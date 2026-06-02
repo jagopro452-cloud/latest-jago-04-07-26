@@ -1,0 +1,22 @@
+{
+  "folders": [
+    {
+      "name": "JAGO Canonical App",
+      "path": "jago-Updates-23-04-jago/jago_app-main/app"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/_safe_archive_2026-05-20": true,
+      "**/node_modules": true,
+      "**/build": true,
+      "**/.dart_tool": true
+    },
+    "search.exclude": {
+      "**/_safe_archive_2026-05-20": true,
+      "**/node_modules": true,
+      "**/build": true,
+      "**/.dart_tool": true
+    }
+  }
+}

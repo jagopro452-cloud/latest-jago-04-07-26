@@ -1,0 +1,16 @@
+{
+  "name": "jago-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Repo root proxy - real app lives in jago_app-main/. This delegates npm scripts so DigitalOcean App Platform (with source_dir: /) still works even if .do/app.yaml source_dir is not applied.",
+  "scripts": {
+    "install:app": "cd jago_app-main && npm ci --include=dev",
+    "build": "cd jago_app-main && npm ci --include=dev && npm run build",
+    "dev": "cd jago_app-main && npm run dev",
+    "start": "cd jago_app-main && npm start",
+    "postinstall": "cd jago_app-main && npm ci --include=dev"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

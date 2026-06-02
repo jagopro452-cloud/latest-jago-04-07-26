@@ -1,0 +1,1067 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:shimmer/shimmer.dart';
+import '../../config/api_config.dart';
+import '../../config/jago_theme.dart';
+import '../../services/auth_service.dart';
+
+class WalletScreen extends StatefulWidget {
+  const WalletScreen({super.key});
+  @override
+  State<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends State<WalletScreen>
+    with SingleTickerProviderStateMixin {
+  Map<String, dynamic>? _wallet;
+  List<Map<String, dynamic>> _paymentMethods = [];
+  bool _loading = true;
+  bool _paying = false;
+  bool _paymentMethodsLoading = true;
+  double? _pendingAmount;
+  String? _pendingIdempotencyKey;
+  String? _walletError;
+  late AnimationController _headerCtrl;
+  late Animation<double> _headerFade;
+
+  late Razorpay _razorpay;
+
+  @override
+  void initState() {
+    super.initState();
+    _headerCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 700));
+    _headerFade = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
+
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    _fetchWallet();
+    _fetchPaymentMethods();
+  }
+
+  @override
+  void dispose() {
+    _headerCtrl.dispose();
+    _razorpay.clear();
+    super.dispose();
+  }
+
+  static String _generateIdempotencyKey() {
+    final rnd = Random.secure();
+    final bytes = List.generate(16, (_) => rnd.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
+    String hex(int b) => b.toRadixString(16).padLeft(2, '0');
+    return '${bytes.sublist(0, 4).map(hex).join()}-'
+        '${bytes.sublist(4, 6).map(hex).join()}-'
+        '${bytes.sublist(6, 8).map(hex).join()}-'
+        '${bytes.sublist(8, 10).map(hex).join()}-'
+        '${bytes.sublist(10).map(hex).join()}';
+  }
+
+  Map<String, dynamic> _safeBody(String raw) {
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> _fetchWallet() async {
+    try {
+      final headers = await AuthService.getHeaders();
+      final res = await http.get(Uri.parse(ApiConfig.wallet), headers: headers);
+      if (res.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            _wallet = jsonDecode(res.body);
+            _loading = false;
+            _walletError = null;
+          });
+          _headerCtrl.forward();
+        }
+      } else {
+        final body = _safeBody(res.body);
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _walletError =
+                body['message']?.toString() ?? 'Could not load wallet right now.';
+          });
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _walletError =
+              'Could not load wallet right now. Check your connection and retry.';
+        });
+      }
+    }
+  }
+
+  Future<void> _fetchPaymentMethods() async {
+    try {
+      final headers = await AuthService.getHeaders();
+      final res = await http
+          .get(Uri.parse(ApiConfig.paymentMethods), headers: headers)
+          .timeout(const Duration(seconds: 12));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final body = _safeBody(res.body);
+        final methods = (body['methods'] as List<dynamic>? ?? [])
+            .map((entry) => Map<String, dynamic>.from(entry as Map))
+            .toList();
+        setState(() {
+          _paymentMethods = methods;
+          _paymentMethodsLoading = false;
+        });
+      } else {
+        setState(() => _paymentMethodsLoading = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _paymentMethodsLoading = false);
+    }
+  }
+
+  Future<void> _startRazorpayPayment(double amount) async {
+    setState(() => _paying = true);
+    _pendingAmount = amount;
+    _pendingIdempotencyKey = _generateIdempotencyKey();
+    try {
+      final headers = await AuthService.getHeaders();
+      final profileData = await AuthService.getProfile();
+      final res = await http.post(
+        Uri.parse(ApiConfig.walletCreateOrder),
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': _pendingIdempotencyKey!,
+        },
+        body: jsonEncode({'amount': amount}),
+      ).timeout(const Duration(seconds: 15));
+      final body = _safeBody(res.body);
+      if (res.statusCode != 200) {
+        if (mounted) setState(() => _paying = false);
+        if (mounted) {
+          _showSnack(
+              body['message']?.toString() ??
+                  'Could not start wallet payment right now.',
+              JT.primaryDark);
+        }
+        return;
+      }
+      final order = body['order'];
+      final keyId = body['keyId'] as String;
+      final phone = profileData?['phone'] ?? '';
+      final email = profileData?['email'] ?? 'customer@jago.com';
+
+      final options = {
+        'key': keyId,
+        'amount': (amount * 100).toInt(),
+        'name': 'Jago Rides',
+        'description': 'Wallet Recharge',
+        'order_id': order['id'],
+        'prefill': {'contact': '+91$phone', 'email': email},
+        'theme': {'color': '#2F80ED'},
+        'modal': {'confirm_close': true},
+      };
+      _razorpay.open(options);
+    } catch (e) {
+      if (mounted) setState(() => _paying = false);
+      if (mounted) {
+        _showSnack(
+            'Could not reach the payment gateway. Check your connection and try again.',
+            JT.primaryDark);
+      }
+    }
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    if (mounted) setState(() => _paying = false);
+    await _verifyPaymentWithRetry(response, maxAttempts: 3);
+  }
+
+  Future<void> _verifyPaymentWithRetry(
+    PaymentSuccessResponse response, {
+    required int maxAttempts,
+  }) async {
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final headers = await AuthService.getHeaders();
+        final res = await http.post(
+          Uri.parse(ApiConfig.walletVerifyPayment),
+          headers: {...headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'razorpayOrderId': response.orderId,
+            'razorpayPaymentId': response.paymentId,
+            'razorpaySignature': response.signature,
+          }),
+        ).timeout(const Duration(seconds: 15));
+        final body = _safeBody(res.body);
+        if (!mounted) return;
+        if (res.statusCode == 200) {
+          _showSnack(
+              body['message'] ??
+                  '₹${_pendingAmount?.toStringAsFixed(0)} added to wallet!',
+              JT.primary);
+          _fetchWallet();
+          return;
+        } else if (res.statusCode >= 400 && res.statusCode < 500) {
+          // Client error — no point retrying
+          _showSnack(
+              body['message']?.toString() ??
+                  'Payment completed but verification failed.',
+              JT.primaryDark);
+          return;
+        }
+      } catch (_) {
+        // Network/timeout error — retry with backoff
+      }
+      if (attempt < maxAttempts) {
+        await Future.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+    if (mounted) {
+      _showSnack('Payment done but verification failed. Contact support.',
+          JT.primaryDark);
+    }
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    if (mounted) {
+      setState(() => _paying = false);
+      _showSnack(response.message ?? 'Payment failed. Please try again.',
+          JT.primaryDark);
+    }
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    if (mounted) {
+      setState(() => _paying = false);
+      _showSnack('External wallet: ${response.walletName}', JT.primary);
+    }
+  }
+
+  void _showSnack(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content:
+          Text(msg, style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+      backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
+  }
+
+  void _showAddMoneySheet() {
+    double? selectedPreset;
+    final customCtrl = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          padding: EdgeInsets.fromLTRB(24, 16, 24, MediaQuery.of(ctx).viewInsets.bottom + 16),
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFE5E7EB), borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Add Money',
+                        style: GoogleFonts.poppins(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF111827))),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded,
+                          color: Color(0xFF9CA3AF)),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFF0F7FF),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.verified_rounded,
+                          color: Color(0xFF2D8CFF), size: 14),
+                      const SizedBox(width: 5),
+                      Text('Secured by Razorpay',
+                          style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              color: const Color(0xFF2D8CFF),
+                              fontWeight: FontWeight.w400)),
+                    ]),
+                  ),
+                ]),
+                const SizedBox(height: 24),
+                Text('Quick Add',
+                    style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFF9CA3AF),
+                        letterSpacing: 0.5)),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [100, 200, 500, 1000, 2000].map((amt) {
+                    final sel = selectedPreset == amt.toDouble();
+                    return GestureDetector(
+                      onTap: () => setModalState(() {
+                        selectedPreset = amt.toDouble();
+                        customCtrl.text = amt.toString();
+                      }),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 11),
+                        decoration: BoxDecoration(
+                          color: sel ? const Color(0xFF2C95F1) : const Color(0xFFF9FAFB),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: sel ? const Color(0xFF2C95F1) : const Color(0xFFE5E7EB)),
+                          boxShadow: sel ? [BoxShadow(color: const Color(0xFF2C95F1).withValues(alpha: 0.2), blurRadius: 10)] : [],
+                        ),
+                        child: Text('₹$amt',
+                            style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                                color: sel
+                                    ? Colors.white
+                                    : const Color(0xFF374151))),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 24),
+                Text('Custom Amount',
+                    style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFF9CA3AF),
+                        letterSpacing: 0.5)),
+                const SizedBox(height: 10),
+                Container(
+                  decoration: BoxDecoration(
+                      color: const Color(0xFFF9FAFB),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE5E7EB))),
+                  child: Row(children: [
+                    Padding(
+                      padding: const EdgeInsets.only(left: 16),
+                      child: Text('₹',
+                          style: GoogleFonts.poppins(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF111827))),
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: customCtrl,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) =>
+                            setModalState(() => selectedPreset = null),
+                        style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: const Color(0xFF111827)),
+                        decoration: InputDecoration(
+                          hintText: 'Enter amount (min ₹10)',
+                          hintStyle: GoogleFonts.poppins(
+                              color: const Color(0xFF9CA3AF), fontSize: 14),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 16),
+                        ),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _paying
+                        ? null
+                        : () {
+                            final raw = customCtrl.text.trim();
+                            final amt = double.tryParse(raw);
+                            if (amt == null || amt < 10) {
+                              _showSnack(
+                                  'Minimum amount is ₹10', const Color(0xFFEF4444));
+                              return;
+                            }
+                            Navigator.pop(ctx);
+                            _startRazorpayPayment(amt);
+                          },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2C95F1),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                    child: Text('Add Money',
+                        style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600, fontSize: 16)),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final balance = _wallet?['balance'] ?? _wallet?['walletBalance'] ?? 0;
+    final balanceDouble = balance is num
+        ? balance.toDouble()
+        : double.tryParse(balance.toString()) ?? 0.0;
+    final transactions = (_wallet?['transactions'] as List?) ??
+        (_wallet?['history'] as List?) ??
+        [];
+
+    const Color lavenderBg = Color(0xFFF0F7FF); // Very soft lavender background
+
+    return Scaffold(
+      backgroundColor: lavenderBg,
+      body: _loading
+          ? _buildWalletSkeleton()
+          : _walletError != null
+              ? _buildErrorState()
+          : CustomScrollView(
+              physics: const BouncingScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(child: _buildHeader(balanceDouble)),
+                SliverToBoxAdapter(child: _buildPaymentMethods()),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Transaction History',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 18,
+                            color: const Color(0xFF1F2937),
+                          ),
+                        ),
+                        Text(
+                          '${transactions.length} records',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            color: const Color(0xFF9CA3AF),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (transactions.isEmpty)
+                  SliverToBoxAdapter(child: _buildEmpty())
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (_, i) => _buildTransactionItem(transactions[i]),
+                        childCount: transactions.length,
+                      ),
+                    ),
+                  ),
+                const SliverToBoxAdapter(child: SizedBox(height: 40)),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Container(
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: const Color(0xFFF1F5F9), width: 1.5),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi_off_rounded,
+                  size: 46, color: Color(0xFFEF4444)),
+              const SizedBox(height: 16),
+              Text(
+                'Wallet Unavailable',
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _walletError ?? 'Could not load wallet right now.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: const Color(0xFF6B7280),
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _loading = true;
+                    _walletError = null;
+                  });
+                  _fetchWallet();
+                  _fetchPaymentMethods();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2C95F1),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: Text(
+                  'Retry',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWalletSkeleton() {
+    Widget box(double w, double h, {double r = 8}) => Container(
+          width: w,
+          height: h,
+          decoration: BoxDecoration(
+              color: Colors.white, borderRadius: BorderRadius.circular(r)),
+        );
+    return Shimmer.fromColors(
+        baseColor: const Color(0xFFE5E7EB),
+        highlightColor: const Color(0xFFF3F4F6),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Header balance card skeleton
+            Container(
+              height: 160,
+              decoration: BoxDecoration(
+                  color: Colors.white, borderRadius: BorderRadius.circular(20)),
+            ),
+            const SizedBox(height: 20),
+            // Add money button skeleton
+            box(double.infinity, 52, r: 14),
+            const SizedBox(height: 24),
+            // Transactions header
+            box(160, 18, r: 6),
+            const SizedBox(height: 16),
+            // Transaction rows
+            ...List.generate(
+                5,
+                (_) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(children: [
+                        box(40, 40, r: 10),
+                        const SizedBox(width: 12),
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              box(120, 13, r: 5),
+                              const SizedBox(height: 6),
+                              box(80, 11, r: 5),
+                            ])),
+                        box(60, 16, r: 6),
+                      ]),
+                    )),
+          ]),
+        ),
+      );
+    }
+
+  Widget _buildHeader(double balance) {
+    return FadeTransition(
+      opacity: _headerFade,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(36),
+                boxShadow: [
+                  BoxShadow(color: Color(0xFF2C95F1).withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, 12)),
+                ],
+              ),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(34),
+                  border: Border.all(color: const Color(0xFFF1F5F9), width: 1.5),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0F7FF),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(Icons.wallet_rounded, color: Color(0xFF2D8CFF), size: 24),
+                        ),
+                        const SizedBox(width: 14),
+                        Text('My Wallet',
+                            style: GoogleFonts.poppins(
+                                color: const Color(0xFF111827),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+                    Text('₹${balance.toStringAsFixed(2)}',
+                        style: GoogleFonts.poppins(
+                            color: const Color(0xFF111827),
+                            fontSize: 48,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: -1)),
+                    const SizedBox(height: 4),
+                    Text('Available Balance',
+                        style: GoogleFonts.poppins(
+                            color: const Color(0xFF6B7280), fontSize: 14, fontWeight: FontWeight.w400)),
+                    const SizedBox(height: 36),
+                    Container(
+                      width: double.infinity,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: const Color(0xFFF1F5F9), width: 1),
+                      ),
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: _paying ? null : _showAddMoneySheet,
+                          child: Container(
+                            width: 220,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF2C95F1), Color(0xFF5BABFF)],
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                              ),
+                              borderRadius: BorderRadius.circular(24),
+                              boxShadow: [
+                                BoxShadow(color: const Color(0xFF2C95F1).withValues(alpha: 0.3), blurRadius: 15, offset: const Offset(0, 6)),
+                              ],
+                            ),
+                            child: _paying
+                              ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
+                              : Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.add_circle_rounded, color: Colors.white, size: 20),
+                                    const SizedBox(width: 10),
+                                    Text('Add Money',
+                                        style: GoogleFonts.poppins(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 16)),
+                                  ],
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _methodIcon(String key) {
+    switch (key) {
+      case 'upi':
+        return Icons.qr_code_scanner_rounded;
+      case 'cards':
+        return Icons.credit_card_rounded;
+      case 'net_banking':
+        return Icons.account_balance_rounded;
+      case 'wallet':
+      case 'wallets':
+        return Icons.account_balance_wallet_rounded;
+      case 'cash':
+        return Icons.payments_rounded;
+      default:
+        return Icons.wallet_rounded;
+    }
+  }
+
+  Color _methodColor(String key) {
+    switch (key) {
+      case 'upi':
+        return const Color(0xFF2D8CFF);
+      case 'cards':
+        return const Color(0xFF2C95F1);
+      case 'net_banking':
+        return const Color(0xFF10B981);
+      case 'wallet':
+      case 'wallets':
+        return const Color(0xFFF59E0B);
+      case 'cash':
+        return const Color(0xFFEF4444);
+      default:
+        return const Color(0xFF6B7280);
+    }
+  }
+
+  Widget _buildPaymentMethods() {
+    final methods = _paymentMethods.isNotEmpty
+        ? _paymentMethods
+        : [
+            {
+              'id': 'upi',
+              'name': 'UPI',
+              'isActive': true,
+              'providers': const [],
+            },
+            {
+              'id': 'cards',
+              'name': 'Cards',
+              'isActive': true,
+              'providers': const [],
+            },
+            {
+              'id': 'net_banking',
+              'name': 'Net Banking',
+              'isActive': true,
+              'providers': const [],
+            },
+            {
+              'id': 'wallets',
+              'name': 'Wallet Apps',
+              'isActive': true,
+              'providers': const [],
+            },
+          ];
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 15, offset: const Offset(0, 8)),
+        ],
+        border: Border.all(color: const Color(0xFFF1F5F9), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Payment Methods',
+              style: GoogleFonts.poppins(
+                  fontSize: 16, fontWeight: FontWeight.w600, color: const Color(0xFF1F2937))),
+          const SizedBox(height: 2),
+          Text('Powered by Razorpay — all methods accepted',
+              style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF9CA3AF))),
+          const SizedBox(height: 24),
+          if (_paymentMethodsLoading) ...[
+            Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Refreshing live payment methods...',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: const Color(0xFF6B7280),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: methods.map((m) {
+              final key = (m['id'] ?? m['icon'] ?? '').toString().toLowerCase();
+              final title = (m['name'] ?? m['label'] ?? 'Method').toString();
+              final active = (m['isActive'] ?? true) == true;
+              final color = _methodColor(key);
+              final providers = (m['providers'] as List?)
+                      ?.map((e) => (e as Map)['name']?.toString() ?? '')
+                      .where((e) => e.isNotEmpty)
+                      .take(3)
+                      .join(' • ') ??
+                  '';
+              return AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: active ? 1 : 0.48,
+                child: Container(
+                  width: 148,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.18),
+                      width: 1.2,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              _methodIcon(key),
+                              color: color,
+                              size: 22,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (!active)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF3F4F6),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                'Off',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF6B7280),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF1F2937),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        providers.isNotEmpty
+                            ? providers
+                            : active
+                                ? 'Available now'
+                                : 'Temporarily unavailable',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          height: 1.35,
+                          color: const Color(0xFF6B7280),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmpty() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: const Color(0xFFF1F5F9), width: 1.5),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 140, height: 100,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0F7FF),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Center(
+              child: Icon(Icons.receipt_long_rounded, size: 48, color: Color(0xFF2C95F1)),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text('No transactions yet',
+              style: GoogleFonts.poppins(
+                  color: const Color(0xFF1F2937),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text('Your recent transactions will appear here.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(
+                  color: const Color(0xFF6B7280), fontSize: 14, height: 1.5)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTransactionItem(Map<String, dynamic> t) {
+    final isCredit = t['type'] == 'credit';
+    final method = (t['paymentMethod'] ?? t['payment_method'] ?? '')
+        .toString()
+        .toLowerCase();
+    final isRazorpay = method.contains('razorpay');
+    final accent = isCredit ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+    final date = t['date'] ?? t['created_at'] ?? t['createdAt'] ?? '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 8, offset: const Offset(0, 4)),
+        ],
+        border: Border.all(color: const Color(0xFFF1F5F9), width: 1),
+      ),
+      child: Row(children: [
+        Container(
+          width: 48, height: 48,
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(
+            isCredit ? Icons.add_rounded : Icons.remove_rounded,
+            color: accent,
+            size: 24,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(t['description'] ?? 'Transaction',
+                  style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                      color: const Color(0xFF111827)),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 2),
+              Row(children: [
+                if (isRazorpay) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFF0F7FF),
+                        borderRadius: BorderRadius.circular(4)),
+                    child: Text('Razorpay',
+                        style: GoogleFonts.poppins(
+                            fontSize: 9,
+                            color: const Color(0xFF4F46E5),
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Text(date,
+                    style: GoogleFonts.poppins(
+                        color: const Color(0xFF9CA3AF), fontSize: 11)),
+              ]),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          '${isCredit ? '+' : '-'}₹${t['amount']}',
+          style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w600, fontSize: 16, color: accent),
+        ),
+      ]),
+    );
+  }
+}
