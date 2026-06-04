@@ -102,6 +102,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       source: type == 'selfie' ? ImageSource.camera : ImageSource.gallery,
       preferredCameraDevice: type == 'selfie' ? CameraDevice.front : CameraDevice.rear,
       imageQuality: 70,
+      maxWidth: 1024,
     );
     if (picked != null) {
       setState(() {
@@ -199,7 +200,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               'imageData': b64,
               if (expiryDate != null) 'expiryDate': expiryDate.toIso8601String(),
             }),
-          );
+          ).timeout(const Duration(seconds: 30));
         }
       }
 

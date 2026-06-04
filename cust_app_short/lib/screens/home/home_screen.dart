@@ -73,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _bannerIndex = 0;
   Timer? _bannerTimer;
   final PageController _bannerPageCtrl = PageController();
+  Map<String, bool> _featureFlags = {};
 
   // ── Live Map state ────────────────────────────────────────────────────────
   GoogleMapController? _mapController;
@@ -99,6 +100,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadSavedPlaces();
     _loadRecentTrips();
     _fetchBanners();
+    _fetchFeatureFlags();
     _connectSocket();
     // Safety fallback: never show loading more than 6 seconds
     _loadingTimeout = Timer(const Duration(seconds: 6), () {
@@ -196,13 +198,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _fetchFeatureFlags() async {
     try {
       final r = await http
-          .get(Uri.parse('${ApiConfig.baseUrl}/api/app/feature-flags'))
+          .get(Uri.parse(ApiConfig.featureFlags))
           .timeout(const Duration(seconds: 6));
       if (r.statusCode == 200 && mounted) {
-        // feature flags loaded (unused by current UI)
+        final data = jsonDecode(r.body) as Map<String, dynamic>;
+        final raw = data['flags'] ?? data['featureFlags'] ?? data;
+        if (raw is Map) {
+          final parsed = <String, bool>{};
+          raw.forEach((k, v) {
+            if (v is bool) parsed[k.toString()] = v;
+            else if (v is int) parsed[k.toString()] = v != 0;
+            else if (v is String) parsed[k.toString()] = v == 'true' || v == '1';
+          });
+          setState(() => _featureFlags = parsed);
+        }
       }
     } catch (_) {}
   }
+
+  bool _flag(String key, {bool defaultValue = true}) =>
+      _featureFlags.containsKey(key) ? _featureFlags[key]! : defaultValue;
 
   // ── LIVE MAP: Nearby Drivers ─────────────────────────────────────────────
 
@@ -651,9 +666,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      // App went to background — pause the nearby-drivers poll to save battery
+      // App went to background — pause polls to save battery
+      // Socket remains connected so trip events still arrive via socket
       _nearbyDriversTimer?.cancel();
       _nearbyDriversTimer = null;
+      _statePollTimer?.cancel();
+      _statePollTimer = null;
     } else if (state == AppLifecycleState.resumed) {
       // App came back to foreground — refresh pickup location and restart polling
       _getLocation();
@@ -661,6 +679,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _nearbyDriversTimer = Timer.periodic(
             const Duration(seconds: 10), (_) => _fetchNearbyDrivers());
         _fetchNearbyDrivers(); // refresh immediately on resume
+      }
+      // Resume trip state poll if actively searching
+      if (_activeTrip != null && _statePollTimer == null) {
+        _statePollTimer = Timer.periodic(
+            const Duration(seconds: 5), (_) => _pollTripState());
       }
     }
   }
@@ -2474,11 +2497,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     pickupLng: _pickupLng,
                   )));
     } else if (serviceKey.contains('outstation_pool')) {
+      if (!_flag('outstation_pool_enabled')) return;
       Navigator.push(context,
           MaterialPageRoute(builder: (_) => const OutstationPoolScreen()));
     } else if (serviceKey.contains('city_pool') ||
         serviceKey.contains('carpool') ||
         serviceKey.contains('car_sharing')) {
+      if (!_flag('city_pool_enabled')) return;
       Navigator.push(context,
           MaterialPageRoute(builder: (_) => const CarSharingScreen()));
     } else if (serviceKey.contains('intercity_pool') ||
@@ -3224,22 +3249,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const ReferralScreen()));
           }),
-          _drawerItem(
-              Icons.groups_rounded, 'City Pool', textColor, () {
-            Navigator.pop(context);
-            Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const CarSharingScreen()));
-          }),
-          _drawerItem(
-              Icons.route_rounded, 'Outstation Pool', textColor, () {
-            Navigator.pop(context);
-            Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const OutstationPoolScreen()));
-          }),
+          if (_flag('city_pool_enabled'))
+            _drawerItem(
+                Icons.groups_rounded, 'City Pool', textColor, () {
+              Navigator.pop(context);
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const CarSharingScreen()));
+            }),
+          if (_flag('outstation_pool_enabled'))
+            _drawerItem(
+                Icons.route_rounded, 'Outstation Pool', textColor, () {
+              Navigator.pop(context);
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const OutstationPoolScreen()));
+            }),
           _drawerItem(Icons.business_center_rounded, 'B2B Business', textColor,
               () {
             Navigator.pop(context);

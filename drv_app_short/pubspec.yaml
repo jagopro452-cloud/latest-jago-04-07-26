@@ -38,6 +38,7 @@ dependencies:
   just_audio: ^0.9.31
   crypto: ^3.0.3
   flutter_jailbreak_detection: ^1.9.0
+  uuid: ^4.4.0
 
 dev_dependencies:
   flutter_test:

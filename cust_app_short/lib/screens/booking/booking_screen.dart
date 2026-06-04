@@ -42,6 +42,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   GoogleMapController? _mapController;
   bool _loading = false;
   bool _estimating = true;
+  bool _usingFallbackFares = false;
   List<Map<String, dynamic>> _allFares = [];
   int _selectedFareIndex = 0;
   String _paymentMethod = 'cash';
@@ -319,7 +320,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             const SizedBox(height: 4),
             Text('₹${displayMin.floor()} – ₹${displayMax.ceil()}',
               style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w400)),
-            Text('estimated fare', style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11)),
+            Text(_usingFallbackFares ? 'offline estimate · may vary' : 'estimated fare',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11)),
           ])),
           // Real vehicle image — emoji fallback if network fails
           Builder(builder: (_) {
@@ -602,15 +604,15 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           });
         } else {
           // Server returned 200 but body wasn't as expected — use fallbacks
-          if (mounted) setState(() => _allFares = _buildFallbackFares());
+          if (mounted) setState(() { _allFares = _buildFallbackFares(); _usingFallbackFares = true; });
         }
       } else {
         // Server returned error status — use fallbacks
-        if (mounted) setState(() => _allFares = _buildFallbackFares());
+        if (mounted) setState(() { _allFares = _buildFallbackFares(); _usingFallbackFares = true; });
       }
     } catch (_) {
       // Network error — show client-side estimates only on connectivity failure
-      if (mounted) setState(() => _allFares = _buildFallbackFares());
+      if (mounted) setState(() { _allFares = _buildFallbackFares(); _usingFallbackFares = true; });
     }
     if (mounted) setState(() => _estimating = false);
   }
@@ -1106,29 +1108,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       }
     } catch (_) {}
 
-    // Attempt 2: Direct Google Directions API
-    if (!success) {
-      try {
-        final uri = Uri.parse(
-          'https://maps.googleapis.com/maps/api/directions/json?origin=${widget.pickupLat},${widget.pickupLng}&destination=${widget.destLat},${widget.destLng}&key=${ApiConfig.googleMapsApiKey}'
-        );
-        final res = await http.get(uri).timeout(const Duration(seconds: 4));
-        if (res.statusCode == 200) {
-          final data = jsonDecode(res.body);
-          if (data['routes'] != null && data['routes'].isNotEmpty) {
-            final encoded = data['routes'][0]['overview_polyline']['points'];
-            points = _decodePolyline(encoded);
-            final legs = data['routes'][0]['legs'];
-            if (legs != null && legs.isNotEmpty) {
-               fetchedDistMeters = (legs[0]['distance']['value'] as num).toDouble();
-            }
-            success = points.isNotEmpty;
-          }
-        }
-      } catch (_) {}
-    }
-
-    // Attempt 3: Backend Navigation API
+    // Attempt 2: Backend Navigation API (server-proxied, no client key needed)
     if (!success) {
       try {
         final headers = await AuthService.getHeaders();
@@ -1142,7 +1122,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             'optimize': false,
           }),
         ).timeout(const Duration(seconds: 4));
-        
+
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as Map<String, dynamic>;
           final overviewPolyline = data['overviewPolyline']?.toString();

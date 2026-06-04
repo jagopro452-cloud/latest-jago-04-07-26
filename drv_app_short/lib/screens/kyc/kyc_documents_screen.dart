@@ -1,10 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
 import '../../services/auth_service.dart';
-import 'dart:convert';
 
 class KycDocumentsScreen extends StatefulWidget {
   const KycDocumentsScreen({super.key});
@@ -57,14 +58,19 @@ class _KycDocumentsScreenState extends State<KycDocumentsScreen> {
   Future<void> _uploadDoc(String docType) async {
     final picked = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80, maxWidth: 1200);
     if (picked == null) return;
+    final fileBytes = await picked.readAsBytes();
+    if (fileBytes.lengthInBytes > 5 * 1024 * 1024) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File too large. Max 5 MB allowed.'), backgroundColor: Colors.orange));
+      return;
+    }
     setState(() => _uploading[docType] = true);
     try {
       final authHeaders = await AuthService.getHeaders();
       final request = http.MultipartRequest('POST', Uri.parse(ApiConfig.uploadDocument));
       request.headers.addAll(authHeaders);
       request.fields['docType'] = docType;
-      request.files.add(await http.MultipartFile.fromPath('document', picked.path));
-      final response = await request.send();
+      request.files.add(http.MultipartFile.fromBytes('document', fileBytes, filename: picked.name));
+      final response = await request.send().timeout(const Duration(seconds: 30));
       if (response.statusCode == 200) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text('Document uploaded! Under review.'), backgroundColor: JT.primary));

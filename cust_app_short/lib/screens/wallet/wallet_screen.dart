@@ -77,7 +77,7 @@ class _WalletScreenState extends State<WalletScreen>
   Future<void> _fetchWallet() async {
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse(ApiConfig.wallet), headers: headers);
+      final res = await http.get(Uri.parse(ApiConfig.wallet), headers: headers).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         if (mounted) {
           setState(() {
@@ -199,16 +199,24 @@ class _WalletScreenState extends State<WalletScreen>
         final headers = await AuthService.getHeaders();
         final res = await http.post(
           Uri.parse(ApiConfig.walletVerifyPayment),
-          headers: {...headers, 'Content-Type': 'application/json'},
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json',
+            if (_pendingIdempotencyKey != null)
+              'Idempotency-Key': _pendingIdempotencyKey!,
+          },
           body: jsonEncode({
             'razorpayOrderId': response.orderId,
             'razorpayPaymentId': response.paymentId,
             'razorpaySignature': response.signature,
+            if (_pendingIdempotencyKey != null)
+              'idempotencyKey': _pendingIdempotencyKey,
           }),
         ).timeout(const Duration(seconds: 15));
         final body = _safeBody(res.body);
         if (!mounted) return;
-        if (res.statusCode == 200) {
+        // 409 = already processed (Razorpay webhook beat the app) — treat as success
+        if (res.statusCode == 200 || res.statusCode == 409) {
           _showSnack(
               body['message'] ??
                   '₹${_pendingAmount?.toStringAsFixed(0)} added to wallet!',
@@ -216,7 +224,7 @@ class _WalletScreenState extends State<WalletScreen>
           _fetchWallet();
           return;
         } else if (res.statusCode >= 400 && res.statusCode < 500) {
-          // Client error — no point retrying
+          // Other 4xx client error — no point retrying
           _showSnack(
               body['message']?.toString() ??
                   'Payment completed but verification failed.',
@@ -445,7 +453,7 @@ class _WalletScreenState extends State<WalletScreen>
           ),
         ),
       ),
-    );
+    ).then((_) => customCtrl.dispose());
   }
 
   @override

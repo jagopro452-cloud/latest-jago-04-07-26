@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:uuid/uuid.dart';
 import '../config/api_config.dart';
 import '../models/trip_model.dart';
 import 'auth_service.dart';
@@ -40,19 +41,19 @@ class TripService {
     }
   }
 
-  static Future<Map<String, dynamic>> acceptTrip(String tripId) async {
+  static Future<Map<String, dynamic>> acceptTrip(String tripId, {String? idempotencyKey}) async {
     try {
       final headers = await AuthService.getHeaders();
-      final res = await apiRetry(
-        () => http.post(Uri.parse(ApiConfig.driverAcceptTrip),
-            headers: {
-              ...headers,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode({'tripId': tripId})),
-        maxAttempts: 3,
-      );
+      final key = idempotencyKey ?? const Uuid().v4();
+      final res = await http.post(Uri.parse(ApiConfig.driverAcceptTrip),
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Idempotency-Key': key,
+          },
+          body: jsonEncode({'tripId': tripId}))
+          .timeout(const Duration(seconds: 10));
       return _safeJson(res);
     } catch (e) { return {'error': e.toString()}; }
   }

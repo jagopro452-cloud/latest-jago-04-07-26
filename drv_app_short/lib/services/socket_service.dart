@@ -147,6 +147,7 @@ class SocketService {
     }
 
     if (userId.isEmpty) return;
+    if (token.isEmpty) return;
 
     _socket = IO.io(
       baseUrl,
@@ -316,17 +317,17 @@ class SocketService {
   }
 
   /// Heartbeat: if driver is online but no location sent for 15s → auto-offline.
-  /// Prevents ghost-online drivers who have GPS failures.
+  /// Prevents ghost-online drivers who have GPS failures — checked even during active trips.
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!_wasOnline) return;
-      if (_appInBackground || _activeTripId != null) return;
+      if (_appInBackground) return;
       final last = _lastLocationSentAt;
       if (last == null) return;
       final stale = DateTime.now().difference(last).inSeconds >= 15;
       if (stale && _isConnected) {
-        // GPS failed or app went background — mark driver offline
+        // GPS failed mid-trip or location permission revoked — mark driver offline
         _socket!.emit('driver:online', {'isOnline': false});
         _wasOnline = false;
       }
@@ -426,7 +427,7 @@ class SocketService {
     } catch (_) {}
   }
 
-  Future<bool> acceptTrip(String tripId) async {
+  Future<bool> acceptTrip(String tripId, {String? idempotencyKey}) async {
     if (!_isConnected) return false;
     final completer = Completer<bool>();
 
@@ -435,7 +436,10 @@ class SocketService {
       if (!completer.isCompleted) completer.complete(value);
     }
 
-    _socket!.emitWithAck('driver:accept_trip', {'tripId': tripId}, ack: (data) {
+    _socket!.emitWithAck('driver:accept_trip', {
+      'tripId': tripId,
+      if (idempotencyKey != null) 'idempotencyKey': idempotencyKey,
+    }, ack: (data) {
       if (data is Map && data['ok'] == false) {
         safeComplete(false);
         return;

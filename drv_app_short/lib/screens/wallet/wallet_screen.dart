@@ -47,7 +47,7 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
       final res = await http.get(
         Uri.parse(ApiConfig.driverWallet),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         if (mounted) setState(() { _wallet = jsonDecode(res.body); _loading = false; });
       } else {

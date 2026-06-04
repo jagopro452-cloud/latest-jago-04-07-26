@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
 import '../../services/auth_service.dart';
@@ -159,6 +160,102 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
     if (id.isEmpty) return;
     final isActive = !(ride['isActive'] == true || ride['is_active'] == true);
     await _patchRide(id, {'isActive': isActive});
+  }
+
+  Future<void> _showPassengerManifest(String rideId, int bookings) async {
+    if (bookings == 0) { _snack('No passengers booked yet'); return; }
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(content: SizedBox(height: 60, child: Center(child: CircularProgressIndicator()))),
+    );
+    try {
+      final headers = await AuthService.getHeaders();
+      final res = await http.get(
+        Uri.parse(ApiConfig.driverOutstationPoolBookings(rideId)),
+        headers: headers,
+      ).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      Navigator.pop(context);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final passengers = (data['bookings'] ?? data['data'] ?? []) as List;
+        _showManifestDialog(passengers.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList());
+      } else {
+        _snack('Could not load passengers.', error: true);
+      }
+    } catch (_) {
+      if (mounted) { Navigator.pop(context); _snack('Network error.', error: true); }
+    }
+  }
+
+  void _showManifestDialog(List<Map<String, dynamic>> passengers) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.55,
+        minChildSize: 0.35,
+        maxChildSize: 0.9,
+        builder: (_, ctrl) => Container(
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          child: Column(children: [
+            const SizedBox(height: 8),
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(children: [
+                Icon(Icons.people_rounded, color: JT.primary, size: 20),
+                const SizedBox(width: 8),
+                Text('Passengers (${passengers.length})', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15)),
+              ]),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: passengers.isEmpty
+                  ? Center(child: Text('No passengers yet', style: GoogleFonts.poppins(color: JT.textSecondary)))
+                  : ListView.separated(
+                      controller: ctrl,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: passengers.length,
+                      separatorBuilder: (_, __) => const Divider(height: 16),
+                      itemBuilder: (_, i) {
+                        final p = passengers[i];
+                        final name = p['passengerName']?.toString() ?? p['customerName']?.toString() ?? 'Passenger ${i + 1}';
+                        final phone = p['passengerPhone']?.toString() ?? p['customerPhone']?.toString() ?? '';
+                        final seats = p['seatsBooked'] ?? p['seats_booked'] ?? 1;
+                        final pickup = p['pickupAddress']?.toString() ?? '';
+                        final drop = p['dropoffAddress']?.toString() ?? '';
+                        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(color: JT.primary.withValues(alpha: 0.1), shape: BoxShape.circle),
+                            child: Center(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                style: TextStyle(color: JT.primary, fontWeight: FontWeight.w600))),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(name, style: GoogleFonts.poppins(fontWeight: FontWeight.w500, fontSize: 13)),
+                            Text('$seats seat${seats == 1 ? '' : 's'}${pickup.isNotEmpty ? ' · Pickup: $pickup' : ''}${drop.isNotEmpty ? ' · Drop: $drop' : ''}',
+                                style: GoogleFonts.poppins(fontSize: 11, color: JT.textSecondary)),
+                          ])),
+                          if (phone.isNotEmpty)
+                            GestureDetector(
+                              onTap: () => launchUrl(Uri.parse('tel:$phone')),
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: Icon(Icons.call_rounded, size: 18, color: JT.primary),
+                              ),
+                            ),
+                        ]);
+                      },
+                    ),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   Future<void> _completeRide(Map<String, dynamic> ride) async {
@@ -430,6 +527,25 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
             style: GoogleFonts.poppins(fontSize: 12, color: JT.textSecondary),
           ),
           const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _showPassengerManifest(
+                    ride['id']?.toString() ?? '',
+                    (ride['totalBookings'] ?? ride['total_bookings'] ?? 0) as int,
+                  ),
+                  icon: const Icon(Icons.people_outline, size: 15),
+                  label: Text('Passengers ($bookings)'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: JT.primary,
+                    side: BorderSide(color: JT.primary.withValues(alpha: 0.4)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(

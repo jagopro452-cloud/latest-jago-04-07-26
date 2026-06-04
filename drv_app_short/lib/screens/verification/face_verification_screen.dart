@@ -71,13 +71,18 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> with Si
 
   Future<void> _submitSelfie() async {
     if (_selfieFile == null) return;
+    final fileBytes = await _selfieFile!.readAsBytes();
+    if (fileBytes.lengthInBytes > 8 * 1024 * 1024) {
+      if (mounted) setState(() => _error = 'Selfie file too large. Please retake.');
+      return;
+    }
     setState(() { _loading = true; _error = null; });
     try {
       final faceHeaders = await AuthService.getHeaders();
       final request = http.MultipartRequest('POST', Uri.parse(ApiConfig.faceVerify));
       request.headers.addAll(faceHeaders);
-      request.files.add(await http.MultipartFile.fromPath('selfie', _selfieFile!.path));
-      final streamedResponse = await request.send();
+      request.files.add(http.MultipartFile.fromBytes('selfie', fileBytes, filename: 'selfie.jpg'));
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
       final body = await streamedResponse.stream.bytesToString();
       if (streamedResponse.statusCode == 200) {
         if (mounted) setState(() { _submitted = true; _loading = false; });

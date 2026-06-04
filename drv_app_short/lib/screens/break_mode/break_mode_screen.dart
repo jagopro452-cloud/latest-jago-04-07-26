@@ -38,7 +38,7 @@ class _BreakModeScreenState extends State<BreakModeScreen> {
     setState(() => _loading = true);
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/break'), headers: headers);
+      final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/break'), headers: headers).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200 && mounted) {
         final d = jsonDecode(res.body);
         setState(() {
@@ -75,7 +75,7 @@ class _BreakModeScreenState extends State<BreakModeScreen> {
         Uri.parse('${ApiConfig.baseUrl}/api/app/driver/break'),
         headers: headers,
         body: jsonEncode({'minutes': _selectedMinutes}),
-      );
+      ).timeout(const Duration(seconds: 8));
       if (!mounted) return;
       if (res.statusCode == 200) {
         final d = jsonDecode(res.body);
@@ -98,7 +98,7 @@ class _BreakModeScreenState extends State<BreakModeScreen> {
     setState(() => _settingBreak = true);
     try {
       final headers = await AuthService.getHeaders();
-      await http.delete(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/break'), headers: headers);
+      await http.delete(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/break'), headers: headers).timeout(const Duration(seconds: 8));
       _timer?.cancel();
       if (!mounted) return;
       setState(() { _onBreak = false; _minutesLeft = 0; });

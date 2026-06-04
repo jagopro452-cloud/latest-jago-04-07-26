@@ -2,9 +2,12 @@ node_modules/
 release_exports_20260528/
 
 # Android signing secrets — NEVER commit
+*.jks
+*.keystore
 **/android/key.properties
 **/android/app/google-services.json
 **/ios/Runner/GoogleService-Info.plist
+pilot-apks/
 .vscode/
 .claude/
 *.log
@@ -15,6 +18,11 @@ replay_pid*.log
 **/build/
 **/.dart_tool/
 **/.flutter-plugins-dependencies
+**/.flutter-plugins
 **/dist/
 **/test-results/
 **/playwright-report/
+**/.gradle/
+**/android/.gradle/
+**/.idea/
+**/*.iml

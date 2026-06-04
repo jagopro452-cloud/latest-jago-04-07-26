@@ -447,7 +447,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
           'pickupLng': _pickupLng,
           'dropLocations': [{'address': _dropAddressCtrl.text}],
         }),
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(const Duration(seconds: 12));
       if (r.statusCode == 200 && mounted) {
         setState(() => _estimate = jsonDecode(r.body));
       } else if (r.statusCode == 400 && mounted) {
@@ -455,8 +455,12 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
         _showSnack(e['message'] ?? 'Weight exceeds vehicle limit', error: true);
         setState(() { _step = 0; });
         _pageCtrl.animateToPage(0, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+      } else if (mounted) {
+        _showSnack('Could not get fare estimate. Please try again.', error: true);
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) _showSnack('Network error. Please try again.', error: true);
+    }
     if (mounted) setState(() => _estimating = false);
   }
 

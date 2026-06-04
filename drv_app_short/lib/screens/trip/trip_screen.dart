@@ -963,7 +963,7 @@ class _TripScreenState extends State<TripScreen>
 
   Future<void> _loadCancelReasons() async {
     try {
-      final res = await http.get(Uri.parse(ApiConfig.configs));
+      final res = await http.get(Uri.parse(ApiConfig.configs)).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final reasons = (data['cancellationReasons'] as List<dynamic>? ?? [])
@@ -1109,7 +1109,7 @@ class _TripScreenState extends State<TripScreen>
             'tripId': tripId,
             'actualFare': estFare,
             'actualDistance': estDist
-          }));
+          })).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final pricing = data['pricing'] as Map<String, dynamic>? ?? {};
@@ -1155,11 +1155,14 @@ class _TripScreenState extends State<TripScreen>
     try {
       await http.post(Uri.parse(ApiConfig.driverCancelTrip),
           headers: {...cancelHeaders, 'Content-Type': 'application/json'},
-          body: jsonEncode({'tripId': tripId, 'reason': reason}));
+          body: jsonEncode({'tripId': tripId, 'reason': reason})).timeout(const Duration(seconds: 10));
     } catch (_) {}
     _socket.setActiveTrip(null); // clear trip room tracking
     _locationTimer?.cancel();
+    _posStream?.cancel();
+    _posStream = null;
     _stopTripTimer();
+    _stopStatePoll();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(context,
         MaterialPageRoute(builder: (_) => const HomeScreen()), (_) => false);
@@ -1301,7 +1304,7 @@ class _TripScreenState extends State<TripScreen>
     try {
       final res = await http.post(Uri.parse(ApiConfig.driverVerifyOtp),
           headers: {...h, 'Content-Type': 'application/json'},
-          body: jsonEncode({'tripId': tripId, 'otp': otp}));
+          body: jsonEncode({'tripId': tripId, 'otp': otp})).timeout(const Duration(seconds: 10));
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final serverTrip = body['trip'] is Map<String, dynamic>
           ? body['trip'] as Map<String, dynamic>
@@ -1871,7 +1874,7 @@ class _TripScreenState extends State<TripScreen>
     try {
       final res = await http.post(Uri.parse(ApiConfig.verifyDeliveryOtp),
           headers: {...h, 'Content-Type': 'application/json'},
-          body: jsonEncode({'tripId': tripId, 'otp': otp}));
+          body: jsonEncode({'tripId': tripId, 'otp': otp})).timeout(const Duration(seconds: 10));
       if (!mounted) return;
       _showSnack(
           res.statusCode == 200
@@ -1975,7 +1978,7 @@ class _TripScreenState extends State<TripScreen>
             'lat': _center.latitude,
             'lng': _center.longitude,
             'message': 'Driver SOS alert during trip'
-          }));
+          })).timeout(const Duration(seconds: 10));
       if (!mounted) return;
       _showSnack('SOS Alert sent! Help is on the way.');
     } catch (_) {

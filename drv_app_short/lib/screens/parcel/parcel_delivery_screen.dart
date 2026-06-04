@@ -185,10 +185,11 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
         _otpCtrl.clear();
         final allDelivered = data['allDelivered'] == true;
         if (allDelivered) {
+          final serverEarnings = double.tryParse(data['driverEarnings']?.toString() ?? '');
           final fare = double.tryParse(_order['total_fare']?.toString() ?? '0') ?? 0;
           setState(() {
             _stage = _ParcelStage.completed;
-            _driverEarnings = fare * 0.85; // 15% commission
+            _driverEarnings = serverEarnings ?? (fare * 0.85);
           });
         } else {
           setState(() {

@@ -102,6 +102,21 @@ class ApiConfig {
   static String get driverOutstationPoolRides => '$baseUrl/api/app/driver/outstation-pool/rides';
   static String driverOutstationPoolRide(String id) => '$baseUrl/api/app/driver/outstation-pool/rides/$id';
   static String driverCompleteOutstationPoolRide(String id) => '$baseUrl/api/app/driver/outstation-pool/rides/$id/complete';
+  static String driverOutstationPoolBookings(String rideId) =>
+      '$baseUrl/api/app/driver/outstation-pool/rides/$rideId/bookings';
+
+  // Local Pool (City Car Sharing — driver side)
+  static String get driverCarSharingRides => '$baseUrl/api/app/driver/car-sharing/rides';
+  static String get driverCarSharingCreate => '$baseUrl/api/app/driver/car-sharing/create';
+  static String driverCarSharingRide(String id) => '$baseUrl/api/app/driver/car-sharing/rides/$id';
+  static String driverCarSharingManifest(String rideId) =>
+      '$baseUrl/api/app/driver/car-sharing/rides/$rideId/manifest';
+  static String driverCarSharingStart(String rideId) =>
+      '$baseUrl/api/app/driver/car-sharing/rides/$rideId/start';
+  static String driverCarSharingComplete(String rideId) =>
+      '$baseUrl/api/app/driver/car-sharing/rides/$rideId/complete';
+  static String driverCarSharingCancel(String rideId) =>
+      '$baseUrl/api/app/driver/car-sharing/rides/$rideId/cancel';
 
   // ── Heatmap Earnings Predictor ────────────────────────────────────────
   static String driverHeatmap({double lat = 17.38, double lng = 78.49, double radius = 10}) =>

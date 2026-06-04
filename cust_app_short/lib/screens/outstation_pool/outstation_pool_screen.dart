@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
 import '../../services/auth_service.dart';
@@ -472,13 +473,19 @@ class _BookBottomSheetState extends State<_BookBottomSheet> {
     setState(() => _booking = true);
     try {
       final headers = await AuthService.getHeaders();
+      final idempotencyKey = const Uuid().v4();
       final res = await http.post(
         Uri.parse(ApiConfig.outstationPoolBook),
-        headers: {...headers, 'Content-Type': 'application/json'},
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
         body: jsonEncode({
           'rideId': rideId,
           'seatsBooked': _seats,
           'paymentMethod': _paymentMethod,
+          'idempotencyKey': idempotencyKey,
           if (_pickupCtrl.text.trim().isNotEmpty) 'pickupAddress': _pickupCtrl.text.trim(),
           if (_dropCtrl.text.trim().isNotEmpty) 'dropoffAddress': _dropCtrl.text.trim(),
         }),
@@ -678,6 +685,58 @@ class _BookingsTabState extends State<_BookingsTab> {
     _load();
   }
 
+  Future<void> _cancelBooking(String bookingId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cancel Booking?'),
+        content: const Text('This will cancel your seat reservation. Refund (if applicable) will be processed to your wallet within 24 hours.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: JT.error),
+            child: const Text('Cancel Booking'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final headers = await AuthService.getHeaders();
+      final res = await http.post(
+        Uri.parse(ApiConfig.outstationPoolCancelBooking(bookingId)),
+        headers: {...headers, 'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final refund = data['refundAmount'];
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(refund != null
+              ? 'Booking cancelled. ₹${refund.toString()} refund initiated.'
+              : 'Booking cancelled.'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ));
+        _load();
+      } else {
+        final msg = (jsonDecode(res.body) as Map<String, dynamic>)['message']?.toString() ?? 'Could not cancel. Please try again.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: JT.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Network error. Please try again.'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
@@ -825,6 +884,22 @@ class _BookingsTabState extends State<_BookingsTab> {
                 if (formattedCreated.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text('Booked: $formattedCreated', style: TextStyle(fontSize: 11, color: JT.textSecondary.withValues(alpha: 0.7))),
+                ],
+                if (status == 'confirmed') ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => _cancelBooking(b['id']?.toString() ?? ''),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: JT.error,
+                        side: BorderSide(color: JT.error.withValues(alpha: 0.5)),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Cancel Booking', style: TextStyle(fontSize: 13)),
+                    ),
+                  ),
                 ],
               ],
             ),

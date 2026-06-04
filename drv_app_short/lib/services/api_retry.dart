@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 
 /// Retry wrapper for critical API calls.
-/// Retries up to [maxAttempts] times with exponential backoff on network errors.
-/// Only retries on connection/timeout errors — 4xx errors are returned immediately.
+/// Retries up to [maxAttempts] times with TRUE exponential backoff on network/5xx errors.
+/// 4xx client errors are returned immediately — no retry.
 Future<http.Response> apiRetry(
   Future<http.Response> Function() fn, {
   int maxAttempts = 3,
@@ -15,21 +16,20 @@ Future<http.Response> apiRetry(
     try {
       attempt++;
       final res = await fn();
-      // Don't retry on 4xx (client error) — only on 5xx or network failure
       if (res.statusCode >= 500 && attempt < maxAttempts) {
-        await Future.delayed(baseDelay * attempt);
+        await Future.delayed(baseDelay * pow(2, attempt - 1).toInt());
         continue;
       }
       return res;
     } on SocketException catch (_) {
       if (attempt >= maxAttempts) rethrow;
-      await Future.delayed(baseDelay * attempt);
+      await Future.delayed(baseDelay * pow(2, attempt - 1).toInt());
     } on TimeoutException catch (_) {
       if (attempt >= maxAttempts) rethrow;
-      await Future.delayed(baseDelay * attempt);
+      await Future.delayed(baseDelay * pow(2, attempt - 1).toInt());
     } on http.ClientException catch (_) {
       if (attempt >= maxAttempts) rethrow;
-      await Future.delayed(baseDelay * attempt);
+      await Future.delayed(baseDelay * pow(2, attempt - 1).toInt());
     }
   }
 }

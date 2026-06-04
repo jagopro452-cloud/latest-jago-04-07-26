@@ -116,6 +116,7 @@ class SocketService {
     }
 
     if (userId.isEmpty) return;
+    if (token.isEmpty) return;
 
     _socket = IO.io(
       baseUrl,

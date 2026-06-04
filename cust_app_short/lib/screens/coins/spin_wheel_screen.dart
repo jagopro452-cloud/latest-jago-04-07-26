@@ -21,6 +21,7 @@ class _SpinWheelScreenState extends State<SpinWheelScreen>
   bool _canSpin = true;
   List<dynamic> _items = [];
   Map<String, dynamic>? _result;
+  String? _pendingSpinKey;
 
   late AnimationController _controller;
   late Animation<double> _animation;
@@ -54,6 +55,12 @@ class _SpinWheelScreenState extends State<SpinWheelScreen>
     super.dispose();
   }
 
+  String _generateIdempotencyKey() {
+    final rand = Random.secure();
+    final bytes = List<int>.generate(16, (_) => rand.nextInt(256));
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
@@ -61,7 +68,7 @@ class _SpinWheelScreenState extends State<SpinWheelScreen>
       final res = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/app/customer/spin-wheel'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) setState(() {
@@ -90,16 +97,19 @@ class _SpinWheelScreenState extends State<SpinWheelScreen>
 
   Future<void> _play() async {
     if (_spinning || !_canSpin || _items.isEmpty) return;
+    _pendingSpinKey ??= _generateIdempotencyKey();
     setState(() { _spinning = true; _result = null; });
 
     try {
       final headers = await AuthService.getHeaders();
+      headers['Idempotency-Key'] = _pendingSpinKey!;
       final res = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/app/customer/spin-wheel/play'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       final data = jsonDecode(res.body);
       if (res.statusCode == 200) {
+        _pendingSpinKey = null; // clear so next spin gets a fresh key
         _result = data['item'];
         _selectedIndex = _items.indexWhere(
           (it) => it['label'] == data['item']['label']);

@@ -12,6 +12,59 @@ import '../config/api_config.dart';
 @pragma('vm:entry-point')
 Future<void> firebaseBackgroundMessageHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+
+  final data = Map<String, dynamic>.from(message.data);
+  final type = data['type'] ?? '';
+
+  // Persist data so the app can route to the correct screen on open
+  if (type.isNotEmpty) {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_notification', jsonEncode(data));
+    } catch (_) {}
+  }
+
+  // Firebase SDK auto-displays notification+data messages on Android.
+  // For data-only messages (no notification payload), show a local notification.
+  if (message.notification != null) return;
+  if (data['title'] == null && data['body'] == null) return;
+
+  final plugin = FlutterLocalNotificationsPlugin();
+  const initSettings = InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    iOS: DarwinInitializationSettings(),
+  );
+  await plugin.initialize(initSettings);
+  final androidPlugin =
+      plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+  await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
+    'trip_updates',
+    'Trip Updates',
+    description: 'Driver assignment, arrival, and trip status updates',
+    importance: Importance.max,
+  ));
+  await plugin.show(
+    type.hashCode.abs(),
+    data['title']?.toString() ?? 'Jago',
+    data['body']?.toString() ?? '',
+    const NotificationDetails(
+      android: AndroidNotificationDetails(
+        'trip_updates',
+        'Trip Updates',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+        icon: '@mipmap/ic_launcher',
+      ),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    ),
+    payload: jsonEncode(data),
+  );
 }
 
 class FcmService {

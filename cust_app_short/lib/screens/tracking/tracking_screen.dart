@@ -60,6 +60,7 @@ class _TrackingScreenState extends State<TrackingScreen>
   bool _isConnected = true;
   StreamSubscription? _connSub;
   Timer? _pollTimer;
+  int _statusVersion = 0; // monotonic counter — prevents stale HTTP poll overwriting fresh socket state
 
   bool _isArriving = false; // "Pilot is about to arrive" flag
 
@@ -188,6 +189,7 @@ class _TrackingScreenState extends State<TrackingScreen>
           if (newStatus != 'searching') {
             _stopDispatchRecovery();
           }
+          _statusVersion++; // socket always wins — bump version so pending HTTP polls are ignored
           setState(() {
             _status = newStatus;
 
@@ -967,10 +969,16 @@ class _TrackingScreenState extends State<TrackingScreen>
     _dispatchRetryTimer?.cancel();
     _searchAbortTimer?.cancel();
     debugPrint('[DISPATCH] Searching for pilot tripId=${widget.tripId}');
+    int _retryCount = 0;
     _dispatchRetryTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!mounted || _status != 'searching') return;
+      _retryCount++;
+      // Exponential back-off: after 4 retries (60s), poll less frequently.
+      // Multiplier: 1,1,1,1,2,2,4,4,8… capped at every 60s tick (4 ticks = 60s gap).
+      final gap = math.min(math.pow(2, math.max(0, _retryCount - 4)).toInt(), 4);
+      if (_retryCount > 4 && _retryCount % gap != 0) return;
       debugPrint(
-          '[DISPATCH] Search retry: rejoining room and reconciling tripId=${widget.tripId}');
+          '[DISPATCH] Search retry #$_retryCount: rejoining room and reconciling tripId=${widget.tripId}');
       _socket.trackTrip(widget.tripId);
       _pollStatus();
     });
@@ -1071,7 +1079,7 @@ class _TrackingScreenState extends State<TrackingScreen>
         Uri.parse(ApiConfig.boostFare(tripId)),
         headers: headers,
         body: jsonEncode({'boostAmount': amount}),
-      );
+      ).timeout(const Duration(seconds: 10));
       if (!mounted) return;
       if (res.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1234,7 +1242,7 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Future<void> _loadCancelReasons() async {
     try {
-      final res = await http.get(Uri.parse(ApiConfig.configs));
+      final res = await http.get(Uri.parse(ApiConfig.configs)).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final reasons = (data['cancellationReasons'] as List<dynamic>? ?? [])
@@ -1259,6 +1267,7 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Future<void> _pollStatus() async {
     if (!mounted) return;
+    final versionAtStart = _statusVersion; // capture before any await
     try {
       final headers = await AuthService.getHeaders();
       final res = await http
@@ -1269,6 +1278,7 @@ class _TrackingScreenState extends State<TrackingScreen>
           .timeout(const Duration(seconds: 10));
 
       if (!mounted) return;
+      if (_statusVersion != versionAtStart) return; // socket already updated — discard stale poll
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -1718,7 +1728,7 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Future<String> _getSupportPhone() async {
     try {
-      final r = await http.get(Uri.parse(ApiConfig.configs));
+      final r = await http.get(Uri.parse(ApiConfig.configs)).timeout(const Duration(seconds: 5));
       if (r.statusCode == 200) {
         final data = jsonDecode(r.body);
         return data['configs']?['support_phone'] ?? '+916303000000';
@@ -2321,7 +2331,7 @@ class _TrackingScreenState extends State<TrackingScreen>
             'lat': _center.latitude,
             'lng': _center.longitude,
             'message': 'Customer SOS alert during trip',
-          }));
+          })).timeout(const Duration(seconds: 10));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('🚨 SOS Alert sent! Help is on the way.',

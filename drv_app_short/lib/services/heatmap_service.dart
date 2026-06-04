@@ -120,6 +120,9 @@ class HeatmapService {
 
   Timer? _refreshTimer;
   bool _isFetching = false;
+  double _currentLat = 0;
+  double _currentLng = 0;
+  VoidCallback? _onUpdate;
 
   List<HeatmapZone> get zones => List.unmodifiable(_zones);
   HeatmapSuggestion? get suggestion => _suggestion;
@@ -128,11 +131,14 @@ class HeatmapService {
 
   /// Start periodic heatmap refresh. Call when driver goes online.
   void startRefresh(double lat, double lng, {VoidCallback? onUpdate}) {
+    _currentLat = lat;
+    _currentLng = lng;
+    _onUpdate = onUpdate;
     _refreshTimer?.cancel();
     _fetchZones(lat, lng, onUpdate: onUpdate);
     _refreshTimer = Timer.periodic(
       Duration(seconds: _refreshIntervalSeconds),
-      (_) => _fetchZones(lat, lng, onUpdate: onUpdate),
+      (_) => _fetchZones(_currentLat, _currentLng, onUpdate: _onUpdate),
     );
   }
 
@@ -144,12 +150,15 @@ class HeatmapService {
     _suggestion = null;
   }
 
-  /// One-shot refresh with updated driver position.
+  /// Update driver position — used by next timer tick automatically.
   void updatePosition(double lat, double lng, {VoidCallback? onUpdate}) {
+    _currentLat = lat;
+    _currentLng = lng;
+    if (onUpdate != null) _onUpdate = onUpdate;
     if (_refreshTimer == null) {
-      startRefresh(lat, lng, onUpdate: onUpdate);
+      startRefresh(lat, lng, onUpdate: onUpdate ?? _onUpdate);
     } else {
-      _fetchZones(lat, lng, onUpdate: onUpdate);
+      _fetchZones(lat, lng, onUpdate: _onUpdate);
     }
   }
 

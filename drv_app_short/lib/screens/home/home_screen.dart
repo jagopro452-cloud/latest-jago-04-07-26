@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:uuid/uuid.dart';
 import '../../services/heatmap_service.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
@@ -40,6 +41,7 @@ import '../earnings/earnings_screen.dart';
 import '../kyc/kyc_documents_screen.dart';
 import '../parcel/parcel_delivery_screen.dart';
 import '../outstation_pool/outstation_pool_driver_screen.dart';
+import '../car_sharing/pool_driver_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -162,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       final res = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/app/driver/verification-status'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data['verificationStatus'] != 'approved') {
@@ -194,7 +196,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       final res = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/app/driver/active-trip'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return;
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final trip = data['trip'];
@@ -277,13 +279,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
     if (!_eligibleServicesLoaded) {
       debugPrint(
-          '[DISPATCH] Eligible services not loaded; accepting server offer for $tripServiceKey');
-      return true;
+          '[DISPATCH] Eligible services not yet loaded; rejecting trip for $tripServiceKey until config ready');
+      return false;
     }
     if (_eligibleServices.isEmpty) {
       debugPrint(
-          '[DISPATCH] Eligible services unavailable; accepting server offer for $tripServiceKey');
-      return true;
+          '[DISPATCH] Eligible services empty; rejecting trip for $tripServiceKey until config ready');
+      return false;
     }
     final eligibleKeys = _eligibleServices
         .map((entry) => entry['key']?.toString() ?? '')
@@ -735,7 +737,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse(ApiConfig.driverDashboard), headers: headers);
+      final res = await http.get(Uri.parse(ApiConfig.driverDashboard), headers: headers).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (!mounted) return;
@@ -1229,11 +1231,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
     bool accepted = false;
     Map<String, dynamic>? acceptResponse;
+    final acceptIdempotencyKey = const Uuid().v4();
     if (_socketConnected) {
-      accepted = await _socket.acceptTrip(tripId);
+      accepted = await _socket.acceptTrip(tripId, idempotencyKey: acceptIdempotencyKey);
     }
     if (!accepted) {
-      acceptResponse = await TripService.acceptTrip(tripId);
+      acceptResponse = await TripService.acceptTrip(tripId, idempotencyKey: acceptIdempotencyKey);
       accepted = acceptResponse['ok'] == true;
     }
     if (!mounted) return;
@@ -1326,14 +1329,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       setState(() => _incomingTrip = null);
     }
     await FcmService().dismissTripNotification();
-    try {
-      final hdrs = await AuthService.getHeaders();
-      await http.post(
-        Uri.parse(ApiConfig.driverRejectTrip),
-        headers: {...hdrs, 'Content-Type': 'application/json'},
-        body: jsonEncode({'tripId': trip['tripId'] ?? trip['id'] ?? ''}),
-      );
-    } catch (_) {}
+    final tripId = (trip['tripId'] ?? trip['id'] ?? '').toString();
+    if (tripId.isEmpty) return;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final hdrs = await AuthService.getHeaders();
+        final res = await http.post(
+          Uri.parse(ApiConfig.driverRejectTrip),
+          headers: {...hdrs, 'Content-Type': 'application/json'},
+          body: jsonEncode({'tripId': tripId}),
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) return;
+      } catch (_) {}
+      if (attempt == 0) await Future.delayed(const Duration(seconds: 2));
+    }
   }
 
   void _showIncomingParcel() {
@@ -2293,6 +2302,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                 _drawerItem(Icons.route_rounded, 'My Trips', null, () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const TripsHistoryScreen()));
+                }),
+                _drawerItem(Icons.directions_car_rounded, 'City Pool Rides', null, () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const PoolDriverScreen()));
                 }),
                 _drawerItem(Icons.alt_route_rounded, 'Outstation Pool', null, () {
                   Navigator.pop(context);

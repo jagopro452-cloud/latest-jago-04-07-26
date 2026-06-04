@@ -58,7 +58,7 @@ class _CarSharingScreenState extends State<CarSharingScreen>
     try {
       final headers = await AuthService.getHeaders();
       final res = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/app/customer/car-sharing/my-bookings'),
+        Uri.parse(ApiConfig.carSharingMyBookings),
         headers: headers,
       );
       if (res.statusCode == 200 && mounted) {
@@ -66,6 +66,56 @@ class _CarSharingScreenState extends State<CarSharingScreen>
       }
     } catch (_) {}
     if (mounted) setState(() => _myLoading = false);
+  }
+
+  Future<void> _cancelCarSharingBooking(String bookingId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cancel Booking?'),
+        content: const Text('Your seat will be released. Refund (if applicable) will be credited to your wallet within 24 hours.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final headers = await AuthService.getHeaders();
+      final res = await http.post(
+        Uri.parse(ApiConfig.carSharingCancelBooking(bookingId)),
+        headers: {...headers, 'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final refund = data['refundAmount'];
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(refund != null ? 'Cancelled. ₹${refund.toString()} refund initiated.' : 'Booking cancelled.'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ));
+        _loadMyBookings();
+      } else {
+        final msg = (jsonDecode(res.body) as Map<String, dynamic>)['message']?.toString() ?? 'Could not cancel.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Network error. Please try again.'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
   }
 
   Future<void> _book(
@@ -485,6 +535,23 @@ class _CarSharingScreenState extends State<CarSharingScreen>
             'Departure: $depTime',
             style: const TextStyle(color: Colors.grey, fontSize: 12),
           ),
+          if (status.toLowerCase() == 'confirmed') ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => _cancelCarSharingBooking(
+                    (d['id'] ?? d['bookingId'] ?? '').toString()),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red, width: 0.8),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text('Cancel Booking', style: TextStyle(fontSize: 13)),
+              ),
+            ),
+          ],
         ],
       ),
     );

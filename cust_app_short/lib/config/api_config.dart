@@ -118,6 +118,17 @@ class ApiConfig {
   static String get outstationPoolSearch => '$baseUrl/api/app/customer/outstation-pool/search';
   static String get outstationPoolBook => '$baseUrl/api/app/customer/outstation-pool/book';
   static String get outstationPoolBookings => '$baseUrl/api/app/customer/outstation-pool/bookings';
+  static String outstationPoolCancelBooking(String bookingId) =>
+      '$baseUrl/api/app/customer/outstation-pool/bookings/$bookingId/cancel';
+
+  // ── Local Pool (City Car Sharing) ─────────────────────────────────────
+  static String get carSharingRides => '$baseUrl/api/app/customer/car-sharing/rides';
+  static String get carSharingMyBookings => '$baseUrl/api/app/customer/car-sharing/my-bookings';
+  static String get carSharingBook => '$baseUrl/api/app/customer/car-sharing/book';
+  static String carSharingCancelBooking(String bookingId) =>
+      '$baseUrl/api/app/customer/car-sharing/bookings/$bookingId/cancel';
+  static String carSharingDriverLocation(String bookingId) =>
+      '$baseUrl/api/app/customer/car-sharing/bookings/$bookingId/driver-location';
 
   // ── Voice Booking ────────────────────────────────────────────────────
   static String get voiceBookingParse => '$baseUrl/api/app/voice-booking/parse';
