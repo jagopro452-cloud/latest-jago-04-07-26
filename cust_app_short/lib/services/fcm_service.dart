@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
+import 'secure_token_store.dart';
 
 // Background message handler — top-level function required by Firebase
 @pragma('vm:entry-point')
@@ -73,6 +74,7 @@ class FcmService {
   FcmService._internal();
 
   final FlutterLocalNotificationsPlugin _localNotif = FlutterLocalNotificationsPlugin();
+  int _notifCounter = 1000;
   bool _initialized = false;
 
   Future<void> init() async {
@@ -168,10 +170,9 @@ class FcmService {
 
   Future<void> _saveTokenToServer(String token) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final authToken = prefs.getString('auth_token');
-      if (authToken == null) {
-        debugPrint('[FCM-CUSTOMER] ⚠️  No auth_token in prefs — token NOT saved (login first)');
+      final authToken = await SecureTokenStore.read();
+      if (authToken == null || authToken.isEmpty) {
+        debugPrint('[FCM-CUSTOMER] ⚠️  No auth_token in secure store — token NOT saved (login first)');
         return;
       }
       debugPrint('[FCM-CUSTOMER] 📤 Saving token to server: ${token.length > 20 ? token.substring(0, 20) : token}...');
@@ -214,7 +215,7 @@ class FcmService {
     }
 
     _localNotif.show(
-      notif.hashCode,
+      _notifCounter++,
       notif.title,
       notif.body,
       NotificationDetails(

@@ -52,7 +52,7 @@ class _TripsHistoryScreenState extends State<TripsHistoryScreen>
     setState(() => _loading = true);
     final headers = await AuthService.getHeaders();
     try {
-      final res = await http.get(Uri.parse(ApiConfig.trips), headers: headers);
+      final res = await http.get(Uri.parse(ApiConfig.trips), headers: headers).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) {
@@ -94,7 +94,7 @@ class _TripsHistoryScreenState extends State<TripsHistoryScreen>
     try {
       final headers = await AuthService.getHeaders();
       final res = await http.get(Uri.parse(ApiConfig.tripReceipt(tripId)),
-          headers: headers);
+          headers: headers).timeout(const Duration(seconds: 10));
       if (!mounted) return;
       Navigator.pop(ctx);
       if (res.statusCode == 200) {

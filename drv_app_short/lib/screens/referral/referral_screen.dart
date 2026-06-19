@@ -36,7 +36,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
       final res = await http.get(
         Uri.parse(ApiConfig.referral),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) setState(() {

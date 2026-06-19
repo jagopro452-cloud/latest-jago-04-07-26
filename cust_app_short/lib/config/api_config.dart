@@ -3,21 +3,27 @@ class ApiConfig {
   static const String compileTimeBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
 
   // Final production backend/app host. Do not point mobile apps at staging.
-  static const String _prodUrl = 'https://sea-lion-app-h5luj.ondigitalocean.app';
+  static const String _prodUrl = 'http://15.207.65.184:5000';
+
+  // For Android Emulator use 10.0.2.2. For Physical Device use your PC's IP (e.g. 192.168.0.x)
+  static const String _lanDevUrl = 'http://192.168.1.6:5000'; // Target specific physical IP
+
+  static bool _isProd = true; // Production: use live DO backend
 
   static String get baseUrl {
     if (compileTimeBaseUrl.isNotEmpty) {
       final u = compileTimeBaseUrl;
       return u.endsWith('/') ? u.substring(0, u.length - 1) : u;
     }
-    return _prodUrl;
+    return _isProd ? _prodUrl : _lanDevUrl;
   }
+  static bool get isDev => !_isProd;
+  static void useProduction() => _isProd = true;
+  static void useDevelopment() => _isProd = false;
 
-  // MUST be supplied at build time:
-  //   flutter build apk --dart-define=GOOGLE_MAPS_KEY=AIzaSy...
-  // Never commit a real key as the defaultValue.
-  static const String googleMapsApiKey =
-      String.fromEnvironment('GOOGLE_MAPS_KEY', defaultValue: '');
+  // Set at build time: --dart-define=GOOGLE_MAPS_KEY=AIzaSy...
+  // Never hardcode — key must be rotated in Google Cloud Console
+  static const String googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_KEY', defaultValue: 'AIzaSyAiMVYA_ppxeT344tkcoSsjeGGMaPU26eI');
 
   // Socket.IO base URL (same server, no path)
   static String get socketUrl => baseUrl;
@@ -40,6 +46,7 @@ class ApiConfig {
   static String get estimateFare => '$baseUrl/api/app/customer/estimate-fare';
   static String get bookRide => '$baseUrl/api/app/customer/book-ride';
   static String get activeTrip => '$baseUrl/api/app/customer/active-trip';
+  static String get activeBooking => '$baseUrl/api/app/customer/active-booking';
   static String get trackTrip => '$baseUrl/api/app/customer/track-trip';
   static String get cancelTrip => '$baseUrl/api/app/customer/cancel-trip';
   static String get rateDriver => '$baseUrl/api/app/customer/rate-driver';
@@ -54,6 +61,8 @@ class ApiConfig {
   static String get applyCoupon => '$baseUrl/api/app/customer/apply-coupon';
   static String get rideCreateOrder => '$baseUrl/api/app/customer/ride/create-order';
   static String get rideVerifyPayment => '$baseUrl/api/app/customer/ride/verify-payment';
+  static String get ridePendingRecovery => '$baseUrl/api/app/customer/ride/pending-recovery';
+  static String get rideRecoverBooking => '$baseUrl/api/app/customer/ride/recover-booking';
   static String get customerOffers => '$baseUrl/api/app/customer/offers';
   static String get updateProfile => '$baseUrl/api/app/customer/profile';
   static String get scheduleRide => '$baseUrl/api/app/customer/schedule-ride';

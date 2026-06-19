@@ -3,50 +3,63 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/jago_theme.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/auth/login/login_background.dart';
+import '../../widgets/auth/login/login_card.dart';
+import '../../widgets/auth/login/login_create_account_tile.dart';
+import '../../widgets/auth/login/login_feature_highlights.dart';
+import '../../widgets/auth/login/login_header.dart';
+import '../../widgets/auth/login/login_mode_switcher.dart';
+import '../../widgets/auth/login/login_or_divider.dart';
+import '../../widgets/auth/login/login_password_field.dart';
+import '../../widgets/auth/login/login_phone_field.dart';
+import '../../widgets/auth/login/login_primary_button.dart';
+import '../../widgets/auth/login/login_security_banner.dart';
 import '../main_screen.dart';
 import 'forgot_password_screen.dart';
+import 'otp_verify_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
-
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
   final _phoneCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _phoneFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+
   bool _showPassword = false;
   bool _loading = false;
+  LoginMode _mode = LoginMode.phonePassword;
 
-  late final AnimationController _cardCtrl;
-  late final Animation<Offset> _cardSlide;
-  late final AnimationController _logoCtrl;
-  late final Animation<double> _logoFade;
+  late final AnimationController _fadeCtrl;
+  late final Animation<double> _fade;
 
   @override
   void initState() {
     super.initState();
-    _cardCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
-    _cardSlide = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOutCubic));
-    _logoCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
-    _logoFade = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _logoCtrl, curve: Curves.easeOut));
-    _logoCtrl.forward();
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (mounted) _cardCtrl.forward();
-    });
+    _fadeCtrl = AnimationController(
+      vsync: this,
+      duration: JT.animationSlow,
+    );
+    _fade = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _fadeCtrl.forward();
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+    ));
   }
 
   @override
   void dispose() {
-    _cardCtrl.dispose();
-    _logoCtrl.dispose();
+    _fadeCtrl.dispose();
     _phoneCtrl.dispose();
     _passwordCtrl.dispose();
     _phoneFocus.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
@@ -54,26 +67,42 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: GoogleFonts.poppins(fontWeight: FontWeight.w400, color: Colors.white, fontSize: 13)),
+      content: Text(msg, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13)),
       backgroundColor: error ? JT.error : JT.success,
       behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      duration: const Duration(seconds: 3),
+      margin: const EdgeInsets.fromLTRB(JT.spacing16, 0, JT.spacing16, JT.spacing16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JT.radiusMd)),
     ));
   }
 
-  bool _isStrongEnough(String password) => password.length >= 8;
+  Future<void> _sendOtp() async {
+    final phone = _phoneCtrl.text.trim();
+    if (phone.length != 10) {
+      _snack('Valid 10-digit mobile number enter cheyyi', error: true);
+      return;
+    }
+    setState(() => _loading = true);
+    final res = await AuthService.sendOtp(phone);
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (res['success'] == true || res['otp'] != null) {
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => OtpVerifyScreen(phone: phone, devOtp: res['otp']?.toString()),
+      ));
+    } else {
+      _snack(res['message'] ?? 'OTP send chesadam failed', error: true);
+    }
+  }
 
-  Future<void> _loginWithPassword() async {
+  Future<void> _loginWithPhone() async {
     final phone = _phoneCtrl.text.trim();
     final pass = _passwordCtrl.text;
     if (phone.length != 10) {
-      _snack('Enter a valid 10-digit mobile number', error: true);
+      _snack('Valid 10-digit number enter cheyyi', error: true);
       return;
     }
-    if (!_isStrongEnough(pass)) {
-      _snack('Password must be at least 8 characters', error: true);
+    if (pass.length < 6) {
+      _snack('Password minimum 6 characters undali', error: true);
       return;
     }
     setState(() => _loading = true);
@@ -81,147 +110,170 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     if (!mounted) return;
     setState(() => _loading = false);
     if (res['success'] == true || res['token'] != null) {
-      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainScreen()), (_) => false);
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+        (_) => false,
+      );
     } else {
-      _snack(res['message'] ?? 'Login failed', error: true);
+      _snack(res['message'] ?? 'Login failed. Check your credentials.', error: true);
     }
+  }
+
+  void _onContinue() {
+    FocusScope.of(context).unfocus();
+    if (_mode == LoginMode.otp) {
+      _sendOtp();
+    } else {
+      _loginWithPhone();
+    }
+  }
+
+  void _onPhoneSubmit() {
+    if (_mode == LoginMode.phonePassword) {
+      _passwordFocus.requestFocus();
+    } else {
+      _onContinue();
+    }
+  }
+
+  void _onModeChanged(LoginMode mode) {
+    FocusScope.of(context).unfocus();
+    setState(() => _mode = mode);
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: const SystemUiOverlayStyle(statusBarColor: Colors.transparent, statusBarIconBrightness: Brightness.dark),
-      child: Scaffold(
-        backgroundColor: JT.bg,
-        resizeToAvoidBottomInset: true,
-        body: Stack(children: [
-          Positioned.fill(child: Container(color: const Color(0xFFF7FAFF))),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: size.height * 0.42,
-            child: FadeTransition(
-              opacity: _logoFade,
-              child: SafeArea(
-                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Container(
-                    width: 76,
-                    height: 76,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
-                      color: Colors.white,
-                      border: Border.all(color: const Color(0xFFD8E6F8)),
-                      boxShadow: [BoxShadow(color: JT.primary.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 8))],
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final isPasswordMode = _mode == LoginMode.phonePassword;
+
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      body: FadeTransition(
+        opacity: _fade,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const LoginBackground(),
+            SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const LoginHeader(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.fromLTRB(
+                        JT.spacing16,
+                        JT.spacing8,
+                        JT.spacing16,
+                        bottomInset > 0 ? JT.spacing12 : 0,
+                      ),
+                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                      child: LoginCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            LoginModeSwitcher(
+                              mode: _mode,
+                              onModeChanged: _onModeChanged,
+                            ),
+                            const SizedBox(height: JT.spacing16),
+                            LoginSecurityBanner(mode: _mode),
+                            const SizedBox(height: JT.spacing16),
+                            LoginPhoneField(
+                              controller: _phoneCtrl,
+                              focusNode: _phoneFocus,
+                              moveToPasswordOnSubmit: isPasswordMode,
+                              onDone: _onPhoneSubmit,
+                            ),
+                            if (isPasswordMode) ...[
+                              const SizedBox(height: JT.spacing16),
+                              LoginPasswordField(
+                                controller: _passwordCtrl,
+                                focusNode: _passwordFocus,
+                                showPassword: _showPassword,
+                                onToggleVisibility: () {
+                                  setState(() => _showPassword = !_showPassword);
+                                },
+                                onSubmit: _onContinue,
+                              ),
+                              const SizedBox(height: JT.spacing8),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ForgotPasswordScreen(),
+                                    ),
+                                  ),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: JT.primary,
+                                    padding: EdgeInsets.zero,
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  child: Text(
+                                    'Forgot Password?',
+                                    style: JT.caption.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: JT.primary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ] else ...[
+                              const SizedBox(height: JT.spacing12),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.sms_outlined,
+                                    size: 14,
+                                    color: JT.primary.withValues(alpha: 0.8),
+                                  ),
+                                  const SizedBox(width: JT.spacing8),
+                                  Text(
+                                    '6-digit OTP will be sent to this number',
+                                    style: JT.caption,
+                                  ),
+                                ],
+                              ),
+                            ],
+                            const SizedBox(height: JT.spacing24),
+                            LoginPrimaryButton(
+                              label: isPasswordMode ? 'Login' : 'Send OTP',
+                              loading: _loading,
+                              onPressed: _onContinue,
+                            ),
+                            const SizedBox(height: JT.spacing16),
+                            const LoginOrDivider(),
+                            const SizedBox(height: JT.spacing16),
+                            LoginCreateAccountTile(
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                              ),
+                            ),
+                            const SizedBox(height: JT.spacing24),
+                            const LoginFeatureHighlights(),
+                          ],
+                        ),
+                      ),
                     ),
-                    child: Padding(padding: const EdgeInsets.all(10), child: JT.logoBlue(height: 44)),
                   ),
-                  const SizedBox(height: 18),
-                  JT.logoBlue(height: 36),
-                  const SizedBox(height: 6),
-                  Text('Your ride, your way', style: GoogleFonts.poppins(fontSize: 12, color: JT.textSecondary, letterSpacing: 0.5)),
-                ]),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: SlideTransition(
-              position: _cardSlide,
-              child: Container(
-                constraints: BoxConstraints(maxHeight: size.height * 0.64),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 24, offset: const Offset(0, -6))],
-                ),
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.only(left: 28, right: 28, top: 8, bottom: MediaQuery.of(context).viewInsets.bottom + 32),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Center(child: Container(margin: const EdgeInsets.only(top: 12, bottom: 24), width: 36, height: 4, decoration: BoxDecoration(color: JT.border, borderRadius: BorderRadius.circular(2)))),
-                    Text('Welcome Back', style: GoogleFonts.poppins(fontSize: 26, fontWeight: FontWeight.w400, color: JT.textPrimary)),
-                    const SizedBox(height: 4),
-                    Text('Login with mobile number and password', style: GoogleFonts.poppins(fontSize: 13, color: JT.textSecondary)),
-                    const SizedBox(height: 28),
-                    _buildPhoneField(),
-                    const SizedBox(height: 14),
-                    _buildPasswordField(),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: GestureDetector(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ForgotPasswordScreen())),
-                        child: Text('Forgot Password?', style: GoogleFonts.poppins(color: JT.primary, fontWeight: FontWeight.w400, fontSize: 13)),
-                      ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: JT.spacing16),
+                    child: Text(
+                      'v 1.0.62',
+                      textAlign: TextAlign.center,
+                      style: JT.caption.copyWith(color: JT.textTertiary),
                     ),
-                    const SizedBox(height: 24),
-                    JT.gradientButton(label: 'Login', onTap: _loginWithPassword, loading: _loading),
-                    const SizedBox(height: 28),
-                    Row(children: [
-                      Expanded(child: Divider(color: JT.border, thickness: 1.5)),
-                      Padding(padding: const EdgeInsets.symmetric(horizontal: 14), child: Text('or', style: GoogleFonts.poppins(color: JT.iconInactive, fontSize: 13))),
-                      Expanded(child: Divider(color: JT.border, thickness: 1.5)),
-                    ]),
-                    const SizedBox(height: 20),
-                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Text("Don't have an account?  ", style: GoogleFonts.poppins(color: JT.textSecondary, fontSize: 14)),
-                      GestureDetector(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen())),
-                        child: Text('Create Account', style: GoogleFonts.poppins(color: JT.primary, fontWeight: FontWeight.w400, fontSize: 14)),
-                      ),
-                    ]),
-                  ]),
-                ),
+                  ),
+                ],
               ),
             ),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  Widget _buildPhoneField() {
-    return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFD8E6F8), width: 1.2)),
-      child: Row(children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-          decoration: const BoxDecoration(color: Color(0xFFF2F7FF), borderRadius: BorderRadius.only(topLeft: Radius.circular(14), bottomLeft: Radius.circular(14)), border: Border(right: BorderSide(color: Color(0xFFD8E6F8), width: 1.2))),
-          child: Text('+91', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w400, color: JT.primary)),
+          ],
         ),
-        Expanded(
-          child: TextField(
-            controller: _phoneCtrl,
-            focusNode: _phoneFocus,
-            keyboardType: TextInputType.phone,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)],
-            style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w400, color: JT.textPrimary),
-            decoration: InputDecoration(hintText: 'Mobile number', hintStyle: GoogleFonts.poppins(fontSize: 14, color: JT.iconInactive), border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18)),
-          ),
-        ),
-      ]),
-    );
-  }
-
-  Widget _buildPasswordField() {
-    return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFD8E6F8), width: 1.2)),
-      child: TextField(
-        controller: _passwordCtrl,
-        obscureText: !_showPassword,
-        style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w400, color: JT.textPrimary),
-        decoration: InputDecoration(
-          hintText: 'Password',
-          hintStyle: GoogleFonts.poppins(fontSize: 14, color: JT.iconInactive),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-          prefixIcon: const Icon(Icons.lock_outline_rounded, color: JT.iconInactive, size: 20),
-          suffixIcon: IconButton(icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: JT.iconInactive, size: 20), onPressed: () => setState(() => _showPassword = !_showPassword)),
-        ),
-        onSubmitted: (_) => _loginWithPassword(),
       ),
     );
   }

@@ -55,12 +55,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _name = data?['fullName'] ?? data?['name'] ?? 'User';
       _phone = data?['phone'] ?? '';
       _email = data?['email'] ?? '';
-      _rating = (data?['rating'] ?? 5.0).toDouble();
-      _walletBalance = (data?['walletBalance'] ?? 0).toDouble();
-      _loyaltyPoints = (data?['loyaltyPoints'] ?? 0).toInt();
+      _rating = double.tryParse(data?['rating']?.toString() ?? '5.0') ?? 5.0;
+      _walletBalance = double.tryParse(data?['walletBalance']?.toString() ?? '0') ?? 0.0;
+      _loyaltyPoints = int.tryParse(data?['loyaltyPoints']?.toString() ?? '0') ?? 0;
       final stats = data?['stats'] as Map<String, dynamic>? ?? {};
-      _completedTrips = (stats['completedTrips'] ?? 0).toInt();
-      _totalSpent = (stats['totalSpent'] ?? 0).toDouble();
+      _completedTrips = int.tryParse(stats['completedTrips']?.toString() ?? '0') ?? 0;
+      _totalSpent = double.tryParse(stats['totalSpent']?.toString() ?? '0') ?? 0.0;
       _nameCtrl.text = _name;
       _emailCtrl.text = _email;
       _loading = false;

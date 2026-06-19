@@ -30,7 +30,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final headers = await AuthService.getHeaders();
     try {
       final res = await http.get(Uri.parse(ApiConfig.notifications),
-          headers: headers);
+          headers: headers).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) setState(() {
@@ -48,7 +48,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Future<void> _markAllRead() async {
     final headers = await AuthService.getHeaders();
     await http.patch(Uri.parse(ApiConfig.notificationsReadAll),
-        headers: headers);
+        headers: headers).timeout(const Duration(seconds: 5));
     _fetch();
   }
 

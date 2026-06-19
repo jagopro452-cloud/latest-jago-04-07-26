@@ -648,7 +648,7 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    final balance = (_wallet?['walletBalance'] ?? _wallet?['balance'] ?? 0).toDouble();
+    final balance = double.tryParse((_wallet?['walletBalance'] ?? _wallet?['balance'])?.toString() ?? '0') ?? 0.0;
     final isLocked = _wallet?['isLocked'] ?? false;
     final history = (_wallet?['history'] ?? _wallet?['transactions'] ?? []) as List;
     final withdrawals = (_wallet?['withdrawRequests'] ?? []) as List;

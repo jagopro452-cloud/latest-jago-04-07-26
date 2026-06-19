@@ -47,9 +47,9 @@ class _FatigueScreenState extends State<FatigueScreen> {
     try {
       final headers = await AuthService.getHeaders();
       final responses = await Future.wait([
-        http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/fatigue-status'), headers: headers),
-        http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/dashboard'), headers: headers),
-        http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/break'), headers: headers),
+        http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/fatigue-status'), headers: headers).timeout(const Duration(seconds: 10)),
+        http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/dashboard'), headers: headers).timeout(const Duration(seconds: 10)),
+        http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/driver/break'), headers: headers).timeout(const Duration(seconds: 10)),
       ]);
       if (responses[0].statusCode == 200) {
         final data = jsonDecode(responses[0].body);

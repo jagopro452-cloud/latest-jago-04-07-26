@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../config/jago_theme.dart';
 import 'package:http/http.dart' as http;
@@ -58,7 +59,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
         Uri.parse('${ApiConfig.baseUrl}/api/app/driver/choose-model'),
         headers: {...headers, 'Content-Type': 'application/json'},
         body: jsonEncode({'model': widget.selectedModel}),
-      );
+      ).timeout(const Duration(seconds: 10));
     } catch (_) {}
   }
 
@@ -75,7 +76,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
       final res = await http.get(
         Uri.parse(ApiConfig.subscriptionPlans),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         final plans = (body is List)
@@ -87,7 +88,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
           final insRes = await http.get(
             Uri.parse('${ApiConfig.baseUrl}/api/app/driver/insurance/plans'),
             headers: headers,
-          );
+          ).timeout(const Duration(seconds: 10));
           if (insRes.statusCode == 200) {
             final insBody = jsonDecode(insRes.body);
             insPlans = (insBody is List)
@@ -135,13 +136,18 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
         Uri.parse(ApiConfig.subscriptionCreateOrder),
         headers: {...headers, 'Content-Type': 'application/json'},
         body: jsonEncode(body),
-      );
+      ).timeout(const Duration(seconds: 15));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final order = data['order'] as Map<String, dynamic>;
         final breakdown = data['breakdown'] as Map<String, dynamic>? ?? {};
-        final keyId = data['keyId'] as String? ?? '';
+        final keyId = data['keyId']?.toString() ?? '';
+        if (keyId.isEmpty || !keyId.startsWith('rzp_')) {
+          _showError('Payment setup failed. Try again.');
+          setState(() => _isPaying = false);
+          return;
+        }
 
         // Store context for verify step
         _pendingBreakdown = breakdown;
@@ -162,7 +168,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
           final profRes = await http.get(
             Uri.parse('${ApiConfig.baseUrl}/api/app/driver/profile'),
             headers: headers,
-          );
+          ).timeout(const Duration(seconds: 8));
           if (profRes.statusCode == 200) {
             final profData = jsonDecode(profRes.body);
             driverPhone = profData['phone']?.toString() ?? '';
@@ -310,38 +316,66 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     );
   }
 
+  String _generateIdempotencyKey() {
+    final rng = Random.secure();
+    final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
-    try {
-      final headers = await AuthService.getHeaders();
-      final body = <String, dynamic>{
-        'planId': _selectedPlanId,
-        'razorpayPaymentId': response.paymentId,
-        'razorpayOrderId': response.orderId,
-        'razorpaySignature': response.signature,
-      };
-      if (_pendingInsurancePlanId != null) {
-        body['insurancePlanId'] = _pendingInsurancePlanId;
-      }
-      final res = await http.post(
-        Uri.parse(ApiConfig.subscriptionVerify),
-        headers: {...headers, 'Content-Type': 'application/json'},
-        body: jsonEncode(body),
-      );
+    // Generate idempotency key once — reused across all retry attempts so the
+    // server can safely de-duplicate if the network drops mid-request.
+    final idempotencyKey = _generateIdempotencyKey();
+    const maxAttempts = 3;
+    int attempt = 0;
+    while (attempt < maxAttempts) {
+      attempt++;
+      try {
+        final headers = await AuthService.getHeaders();
+        final body = <String, dynamic>{
+          'planId': _selectedPlanId,
+          'razorpayPaymentId': response.paymentId,
+          'razorpayOrderId': response.orderId,
+          'razorpaySignature': response.signature,
+        };
+        if (_pendingInsurancePlanId != null) {
+          body['insurancePlanId'] = _pendingInsurancePlanId;
+        }
+        final res = await http.post(
+          Uri.parse(ApiConfig.subscriptionVerify),
+          headers: {...headers, 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey},
+          body: jsonEncode(body),
+        ).timeout(const Duration(seconds: 20));
 
-      if (mounted) setState(() => _isPaying = false);
+        if (mounted) setState(() => _isPaying = false);
 
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final subscription = data['subscription'] as Map<String, dynamic>? ?? {};
-        if (!mounted) return;
-        _showSuccessDialog(subscription);
-      } else {
-        final errData = jsonDecode(res.body);
-        _showError(errData['message'] ?? 'Failed to activate subscription');
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          final subscription = data['subscription'] as Map<String, dynamic>? ?? {};
+          if (!mounted) return;
+          _showSuccessDialog(subscription);
+          return;
+        } else if (res.statusCode >= 400 && res.statusCode < 500) {
+          // Client error — don't retry
+          try {
+            final errData = jsonDecode(res.body);
+            _showError(errData['message'] ?? 'Failed to activate subscription');
+          } catch (_) {
+            _showError('Failed to activate subscription');
+          }
+          return;
+        }
+        // 5xx — fall through to retry
+      } catch (_) {
+        if (mounted) setState(() => _isPaying = false);
       }
-    } catch (e) {
-      if (mounted) setState(() => _isPaying = false);
-      _showError('Error finalizing payment');
+      if (attempt < maxAttempts) {
+        await Future.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+    if (mounted) {
+      setState(() => _isPaying = false);
+      _showError('Could not verify payment after $maxAttempts attempts. Contact support with payment ID: ${response.paymentId}');
     }
   }
 

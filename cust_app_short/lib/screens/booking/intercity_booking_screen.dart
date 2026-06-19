@@ -39,7 +39,7 @@ class _IntercityBookingScreenState extends State<IntercityBookingScreen> {
     setState(() => _loading = true);
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse(ApiConfig.intercityRoutes), headers: headers);
+      final res = await http.get(Uri.parse(ApiConfig.intercityRoutes), headers: headers).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final routes = (data as List<dynamic>?) ?? [];
@@ -136,7 +136,7 @@ class _IntercityBookingScreenState extends State<IntercityBookingScreen> {
           'pickupAddress': _routeVal(_selectedRoute!, 'fromCity', 'from_city'),
           'destinationAddress': _routeVal(_selectedRoute!, 'toCity', 'to_city'),
         }),
-      );
+      ).timeout(const Duration(seconds: 15));
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 || res.statusCode == 201) {
         if (mounted) {

@@ -14,6 +14,11 @@ class LocationService {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
+    if (permission == LocationPermission.deniedForever) {
+      // User has permanently denied — must open app settings
+      await Geolocator.openAppSettings();
+      return false;
+    }
     return permission == LocationPermission.always ||
         permission == LocationPermission.whileInUse;
   }
@@ -48,6 +53,8 @@ class LocationService {
     double speed = 0,
     bool isOnline = true,
   }) async {
+    // Reject GPS fix with null island coordinates — device hasn't acquired a real fix yet
+    if (lat == 0.0 && lng == 0.0) return;
     try {
       final headers = await AuthService.getHeaders();
       await http.post(
@@ -60,7 +67,7 @@ class LocationService {
           'speed': speed,
           'isOnline': isOnline,
         }),
-      );
+      ).timeout(const Duration(seconds: 5));
     } catch (_) {}
   }
 

@@ -16,11 +16,11 @@ class AppColors {
   static const border = Color(0xFFE5E9F0);         // Border
   static const borderLight = Color(0xFFF0F3F8);    // Light border
 
-  static const primary = Color(0xFF2D8CFF);        // Hero blue
-  static const primaryDark = Color(0xFF1A6FDB);    // Darker variant
-  static const primaryLight = Color(0xFFE8F2FF);   // Light variant
-  static const secondary = Color(0xFF5B9DFF);      // Supporting blue
-  static const tertiary = Color(0xFF2D8CFF);       // Alias
+  static const primary = Color(0xFF2D8CFF);
+  static const primaryDark = Color(0xFF1A6FDB);
+  static const primaryLight = Color(0xFFE8F2FF);
+  static const secondary = Color(0xFF5B9DFF);
+  static const tertiary = Color(0xFF2D8CFF);
   static const error = Color(0xFFDC2626);
   static const warning = Color(0xFFF59E0B);
   static const success = Color(0xFF16A34A);

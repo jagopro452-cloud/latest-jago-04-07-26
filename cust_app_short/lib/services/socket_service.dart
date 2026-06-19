@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_token_store.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
@@ -11,7 +12,8 @@ class SocketService {
 
   IO.Socket? _socket;
   bool _isConnected = false;
-  String? _activeTripId; // stored so we can re-join trip room after server restart
+  String? _activeTripId; // ride trip or parcel order — mutually exclusive per session
+  bool _trackingParcel = false;
 
   final _driverAssignedController = StreamController<Map<String, dynamic>>.broadcast();
   final _driverLocationController = StreamController<Map<String, dynamic>>.broadcast();
@@ -29,6 +31,9 @@ class SocketService {
   final _callIceController = StreamController<Map<String, dynamic>>.broadcast();
   final _callEndedController = StreamController<Map<String, dynamic>>.broadcast();
   final _callRejectedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _parcelDriverLocationController = StreamController<Map<String, dynamic>>.broadcast();
+  final _parcelStatusController = StreamController<Map<String, dynamic>>.broadcast();
+  final _parcelCancelledController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Map<String, dynamic>> get onDriverAssigned => _driverAssignedController.stream;
   Stream<Map<String, dynamic>> get onDriverLocation => _driverLocationController.stream;
@@ -46,6 +51,9 @@ class SocketService {
   Stream<Map<String, dynamic>> get onCallIce => _callIceController.stream;
   Stream<Map<String, dynamic>> get onCallEnded => _callEndedController.stream;
   Stream<Map<String, dynamic>> get onCallRejected => _callRejectedController.stream;
+  Stream<Map<String, dynamic>> get onParcelDriverLocation => _parcelDriverLocationController.stream;
+  Stream<Map<String, dynamic>> get onParcelStatus => _parcelStatusController.stream;
+  Stream<Map<String, dynamic>> get onParcelCancelled => _parcelCancelledController.stream;
   bool get isConnected => _isConnected;
 
   String _eventTripId(Map<String, dynamic> data) {
@@ -67,13 +75,56 @@ class SocketService {
     final activeTripId = _activeTripId;
     if (activeTripId == null || activeTripId.isEmpty) return true;
     final eventTripId = _eventTripId(data);
-    return eventTripId.isNotEmpty && eventTripId == activeTripId;
+    if (eventTripId.isEmpty) return false;
+    return eventTripId == activeTripId;
   }
 
   void _emitTrackTrip(String tripId) {
     if (_socket != null && (_isConnected || _socket!.connected)) {
       _socket!.emit('customer:track_trip', {'tripId': tripId});
     }
+  }
+
+  void _emitTrackParcel(String orderId) {
+    if (_socket != null && (_isConnected || _socket!.connected)) {
+      _socket!.emit('customer:track_parcel', {'orderId': orderId});
+    }
+  }
+
+  String _parcelEventToStatus(String event) {
+    switch (event) {
+      case 'driver_assigned':
+        return 'driver_assigned';
+      case 'pickup_started':
+        return 'picked_up';
+      case 'in_transit':
+      case 'delivery_approaching':
+        return 'in_transit';
+      case 'completed':
+      case 'delivered':
+        return 'completed';
+      case 'cancelled':
+        return 'cancelled';
+      default:
+        return event;
+    }
+  }
+
+  void _handleParcelLifecycle(Map<String, dynamic> data) {
+    final orderId = (data['orderId'] ?? data['id'] ?? '').toString();
+    if (orderId.isEmpty) return;
+    if (_activeTripId != null && orderId != _activeTripId) return;
+    final event = (data['event'] ?? '').toString();
+    final status = _parcelEventToStatus(event);
+    if (status == 'completed' || status == 'cancelled') {
+      _activeTripId = null;
+      _trackingParcel = false;
+    }
+    _parcelStatusController.add({
+      ...data,
+      'orderId': orderId,
+      'status': status,
+    });
   }
 
   /// Reconnects only if the socket is not connected. Safe to call repeatedly.
@@ -95,7 +146,7 @@ class SocketService {
 
     final prefs = await SharedPreferences.getInstance();
     var userId = prefs.getString('user_id') ?? '';
-    final token = prefs.getString('auth_token') ?? '';
+    final token = (await SecureTokenStore.read()) ?? '';
 
     // Recovery: existing installs before the user_id fix may have empty user_id.
     // Attempt to extract it from the saved user JSON so they don't need to reinstall.
@@ -136,14 +187,22 @@ class SocketService {
       _connectedController.add(true);
       // Re-join trip room on every connect (first connect + reconnect after restart)
       if (_activeTripId != null) {
-        _emitTrackTrip(_activeTripId!);
+        if (_trackingParcel) {
+          _emitTrackParcel(_activeTripId!);
+        } else {
+          _emitTrackTrip(_activeTripId!);
+        }
       }
     });
 
     // On reconnect after server restart: re-join active trip room so events resume
     _socket!.on('reconnect', (_) {
       if (_activeTripId != null) {
-        _emitTrackTrip(_activeTripId!);
+        if (_trackingParcel) {
+          _emitTrackParcel(_activeTripId!);
+        } else {
+          _emitTrackTrip(_activeTripId!);
+        }
       }
     });
 
@@ -173,12 +232,22 @@ class SocketService {
 
     // Driver assigned to my trip (socket acceptance path)
     _socket!.on('trip:driver_assigned', (data) {
-      _driverAssignedController.add(Map<String, dynamic>.from(data));
+      final payload = Map<String, dynamic>.from(data);
+      if (!_matchesActiveTrip(payload)) return;
+      _driverAssignedController.add(payload);
+    });
+
+    // Real-time driver GPS location
+    _socket!.on('driver:location_update', (data) {
+      final payload = Map<String, dynamic>.from(data);
+      if (!_matchesActiveTrip(payload)) return;
+      _driverLocationController.add(payload);
     });
 
     // Driver accepted my trip (HTTP acceptance path)
     _socket!.on('trip:accepted', (data) {
       final payload = Map<String, dynamic>.from(data);
+      if (!_matchesActiveTrip(payload)) return;
       payload['driver'] = payload['driver'] is Map<String, dynamic>
           ? Map<String, dynamic>.from(payload['driver'])
           : {
@@ -201,11 +270,6 @@ class SocketService {
         'status': 'accepted',
         if (payload['pickupOtp'] != null) 'otp': payload['pickupOtp'],
       });
-    });
-
-    // Real-time driver GPS location
-    _socket!.on('driver:location_update', (data) {
-      _driverLocationController.add(Map<String, dynamic>.from(data));
     });
 
     // Trip status changed (arrived, in_progress, completed, cancelled)
@@ -313,6 +377,42 @@ class SocketService {
       _callRejectedController.add(Map<String, dynamic>.from(data));
     });
 
+    // ── Parcel delivery tracking ───────────────────────────────────────────
+    _socket!.on('parcel:driver_location', (data) {
+      final payload = Map<String, dynamic>.from(data);
+      final orderId = (payload['orderId'] ?? '').toString();
+      if (_activeTripId != null && orderId.isNotEmpty && orderId != _activeTripId) return;
+      _parcelDriverLocationController.add(payload);
+    });
+
+    for (final event in [
+      'driver_assigned',
+      'pickup_started',
+      'in_transit',
+      'delivery_approaching',
+      'delivered',
+      'completed',
+      'cancelled',
+    ]) {
+      _socket!.on('parcel:$event', (data) {
+        _handleParcelLifecycle(Map<String, dynamic>.from(data));
+      });
+    }
+
+    _socket!.on('parcel:cancelled', (data) {
+      final payload = Map<String, dynamic>.from(data);
+      final orderId = (payload['orderId'] ?? '').toString();
+      if (_activeTripId != null && orderId.isNotEmpty && orderId != _activeTripId) return;
+      _activeTripId = null;
+      _trackingParcel = false;
+      _parcelCancelledController.add(payload);
+      _parcelStatusController.add({
+        ...payload,
+        'orderId': orderId,
+        'status': 'cancelled',
+      });
+    });
+
     _socket!.connect();
   }
 
@@ -320,8 +420,15 @@ class SocketService {
   // Emits immediately if connected; the stored ID ensures re-join on reconnect.
   void trackTrip(String tripId) {
     _activeTripId = tripId;
+    _trackingParcel = false;
     _emitTrackTrip(tripId);
     // If socket not ready yet, the connect handler will pick it up via _activeTripId
+  }
+
+  void trackParcel(String orderId) {
+    _activeTripId = orderId;
+    _trackingParcel = true;
+    _emitTrackParcel(orderId);
   }
 
   void stopTrackingTrip(String tripId) {
@@ -329,12 +436,26 @@ class SocketService {
       _socket!.emit('customer:leave_trip', {'tripId': tripId});
     }
     _activeTripId = null;
+    _trackingParcel = false;
+  }
+
+  void stopTrackingParcel(String orderId) {
+    _activeTripId = null;
+    _trackingParcel = false;
   }
 
   // Cancel a trip
   void cancelTrip(String tripId) {
     if (!_isConnected) return;
     _socket!.emit('customer:cancel_trip', {'tripId': tripId});
+  }
+
+  void cancelParcel(String orderId, {String? reason}) {
+    if (!_isConnected) return;
+    _socket!.emit('customer:cancel_parcel', {
+      'orderId': orderId,
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+    });
   }
 
   // Send in-app chat message (persisted to DB + relayed via socket)
@@ -398,6 +519,7 @@ class SocketService {
   void resetForLogout() {
     disconnect();
     _activeTripId = null;
+    _trackingParcel = false;
   }
 
   // Intentionally NOT exposed: closing broadcast controllers on a singleton

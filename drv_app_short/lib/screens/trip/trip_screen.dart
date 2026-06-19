@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'dart:math' show min, max;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -13,10 +14,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
+import '../../services/api_retry.dart';
 import '../../services/auth_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/call_service.dart';
 import '../../services/trip_service.dart';
+import '../../widgets/jago_map_markers.dart';
 import '../call/call_screen.dart';
 import '../chat/trip_chat_sheet.dart';
 import '../home/home_screen.dart';
@@ -67,6 +70,7 @@ class _TripScreenState extends State<TripScreen>
   String _status = 'accepted';
   Map<String, dynamic>? _trip;
   bool _loading = false;
+  double _arriveSlideOffset = 0;
   bool _nearPickup = false;
   final _otpCtrl = TextEditingController();
   Timer? _locationTimer;
@@ -115,8 +119,12 @@ class _TripScreenState extends State<TripScreen>
       // Register active trip so socket can rejoin room on reconnect
       final tripId = _trip!['tripId'] ?? _trip!['id'];
       if (tripId != null) _socket.setActiveTrip(tripId.toString());
-      final lat = double.tryParse(_trip!['pickupLat']?.toString() ?? '');
-      final lng = double.tryParse(_trip!['pickupLng']?.toString() ?? '');
+      final lat = double.tryParse(_trip!['pickupLat']?.toString() ??
+          _trip!['pickup_lat']?.toString() ??
+          '');
+      final lng = double.tryParse(_trip!['pickupLng']?.toString() ??
+          _trip!['pickup_lng']?.toString() ??
+          '');
       if (lat != null && lng != null && lat != 0) _center = LatLng(lat, lng);
     }
     _startLocationUpdates();
@@ -615,7 +623,7 @@ class _TripScreenState extends State<TripScreen>
 
   // ── Map & Route ───────────────────────────────────────────────────────────
 
-  void _initMapMarkers() {
+  void _initMapMarkers() async {
     if (!mounted || _trip == null) return;
     final pLat = double.tryParse(_trip!['pickupLat']?.toString() ??
         _trip!['pickup_lat']?.toString() ??
@@ -629,14 +637,17 @@ class _TripScreenState extends State<TripScreen>
     final dLng = double.tryParse(_trip!['destinationLng']?.toString() ??
         _trip!['destination_lng']?.toString() ??
         '');
+    final pickupIcon = await JagoMapMarkers.pickup();
+    final destinationIcon = await JagoMapMarkers.destination();
+    if (!mounted) return;
     setState(() {
       _markers.clear();
       if (pLat != null && pLat != 0 && pLng != null) {
         _markers.add(Marker(
           markerId: const MarkerId('pickup'),
           position: LatLng(pLat, pLng),
-          icon:
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          icon: pickupIcon,
+          anchor: const Offset(0.5, 0.9),
           infoWindow: InfoWindow(
             title: 'Pickup',
             snippet: _shortLocation(
@@ -649,7 +660,8 @@ class _TripScreenState extends State<TripScreen>
         _markers.add(Marker(
           markerId: const MarkerId('destination'),
           position: LatLng(dLat, dLng),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          icon: destinationIcon,
+          anchor: const Offset(0.5, 0.9),
           infoWindow: InfoWindow(
             title: 'Drop',
             snippet: _shortLocation((_trip!['destinationShortName'] ??
@@ -662,16 +674,31 @@ class _TripScreenState extends State<TripScreen>
     });
   }
 
-  void _updateSelfMarker(double lat, double lng) {
+  String _tripVehicleType() {
+    return (_trip?['vehicleCategory'] ??
+            _trip?['vehicleCategoryName'] ??
+            _trip?['vehicleName'] ??
+            _trip?['vehicleType'] ??
+            _trip?['vehicle_type'] ??
+            _trip?['tripType'] ??
+            'cab')
+        .toString();
+  }
+
+  void _updateSelfMarker(double lat, double lng, {double rotation = 0}) async {
+    final selfIcon = await JagoMapMarkers.vehicle(_tripVehicleType());
     if (!mounted) return;
     setState(() {
       _markers.removeWhere((m) => m.markerId.value == 'self');
       _markers.add(Marker(
         markerId: const MarkerId('self'),
         position: LatLng(lat, lng),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        icon: selfIcon,
         infoWindow: const InfoWindow(title: 'You'),
         zIndexInt: 2,
+        rotation: rotation.isFinite ? rotation : 0,
+        flat: true,
+        anchor: const Offset(0.5, 0.5),
       ));
     });
   }
@@ -830,8 +857,18 @@ class _TripScreenState extends State<TripScreen>
             _etaSec = (durMin * 60).round();
           });
         }
+      } else if (res.statusCode != 200) {
+        if (mounted) {
+          String msg = 'Could not load route';
+          try {
+            msg = (jsonDecode(res.body) as Map)['message']?.toString() ?? msg;
+          } catch (_) {}
+          _showSnack(msg, error: true);
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) _showSnack('Route unavailable. Check connection.', error: true);
+    }
   }
 
   // ── Location updates ──────────────────────────────────────────────────────
@@ -851,7 +888,11 @@ class _TripScreenState extends State<TripScreen>
     if (mounted) {
       setState(
           () => _center = LatLng(initialPos.latitude, initialPos.longitude));
-      _updateSelfMarker(initialPos.latitude, initialPos.longitude);
+      _updateSelfMarker(
+        initialPos.latitude,
+        initialPos.longitude,
+        rotation: initialPos.heading,
+      );
       // Now that we have real GPS, re-fetch route with accurate origin
       _fetchRouteForCurrentStatus();
     }
@@ -899,11 +940,22 @@ class _TripScreenState extends State<TripScreen>
       if (!mounted) return;
       setState(() => _center = LatLng(pos.latitude, pos.longitude));
       _mapController?.animateCamera(CameraUpdate.newLatLng(_center));
-      _updateSelfMarker(pos.latitude, pos.longitude);
+      _updateSelfMarker(
+        pos.latitude,
+        pos.longitude,
+        rotation: pos.heading,
+      );
       _computeDistanceAndEta(pos.latitude, pos.longitude);
-    }, onError: (_) {
-      _showSnack('Could not read live location. Check GPS permissions.',
-          error: true);
+    }, onError: (e) {
+      debugPrint('[GPS] Stream error in trip: $e — attempting recovery in 5s');
+      if (!mounted) return;
+      _showSnack('GPS signal lost. Reconnecting...', error: true);
+      Future.delayed(const Duration(seconds: 5), () {
+        if (!mounted) return;
+        _posStream?.cancel();
+        _posStream = null;
+        _startLocationUpdates();
+      });
     });
 
     // Server-update timer: every 3 s — uses cached position from stream
@@ -911,7 +963,10 @@ class _TripScreenState extends State<TripScreen>
       final pos = _lastTripPosition;
       if (pos == null || !mounted) return;
       _socket.sendLocation(
-          lat: pos.latitude, lng: pos.longitude, speed: pos.speed);
+          lat: pos.latitude,
+          lng: pos.longitude,
+          heading: pos.heading,
+          speed: pos.speed);
       final locHeaders = await AuthService.getHeaders();
       http
           .post(Uri.parse(ApiConfig.driverLocation),
@@ -930,11 +985,11 @@ class _TripScreenState extends State<TripScreen>
     final toPickup = _status == 'accepted' || _status == 'driver_assigned';
     if (lat == 0 && lng == 0) return; // Ignore invalid coordinates
     final tLat = toPickup
-        ? double.tryParse(_trip!['pickupLat']?.toString() ?? '') ?? 0.0
-        : double.tryParse(_trip!['destinationLat']?.toString() ?? '') ?? 0.0;
+        ? double.tryParse(_trip!['pickupLat']?.toString() ?? _trip!['pickup_lat']?.toString() ?? '') ?? 0.0
+        : double.tryParse(_trip!['destinationLat']?.toString() ?? _trip!['destination_lat']?.toString() ?? '') ?? 0.0;
     final tLng = toPickup
-        ? double.tryParse(_trip!['pickupLng']?.toString() ?? '') ?? 0.0
-        : double.tryParse(_trip!['destinationLng']?.toString() ?? '') ?? 0.0;
+        ? double.tryParse(_trip!['pickupLng']?.toString() ?? _trip!['pickup_lng']?.toString() ?? '') ?? 0.0
+        : double.tryParse(_trip!['destinationLng']?.toString() ?? _trip!['destination_lng']?.toString() ?? '') ?? 0.0;
     if (tLat == 0 && tLng == 0) return;
     final dm = Geolocator.distanceBetween(lat, lng, tLat, tLng);
     final etaS = dm > 0 ? (dm / 8.33).round() : 0;
@@ -1003,7 +1058,17 @@ class _TripScreenState extends State<TripScreen>
 
     try {
       if (_status == 'accepted' || _status == 'driver_assigned') {
-        final body = await TripService.markArrived(tripId);
+        final pos = _lastTripPosition;
+        if (!_nearPickup) {
+          _showSnack('Move within 100m of pickup before marking arrived.', error: true);
+          setState(() => _loading = false);
+          return;
+        }
+        final body = await TripService.markArrived(
+          tripId,
+          lat: pos?.latitude,
+          lng: pos?.longitude,
+        );
         if (!mounted) return;
         if (body['success'] == true ||
             (body['trip'] != null && body['idempotent'] == true)) {
@@ -1082,6 +1147,8 @@ class _TripScreenState extends State<TripScreen>
         return 'This trip is already assigned to another driver.';
       case 'TRIP_CANCELLED':
         return 'Trip was cancelled by customer.';
+      case 'TOO_FAR_FROM_PICKUP':
+        return 'Move closer to the pickup point, then slide to mark arrived.';
       case 'TRIP_ALREADY_COMPLETED':
         return 'Trip already completed.';
       case 'TRIP_NOT_FOUND':
@@ -1103,13 +1170,13 @@ class _TripScreenState extends State<TripScreen>
     final estDist =
         _trip?['estimatedDistance'] ?? _trip?['estimated_distance'] ?? 0.0;
     try {
-      final res = await http.post(Uri.parse(ApiConfig.driverCompleteTrip),
+      final res = await apiRetry(() => http.post(Uri.parse(ApiConfig.driverCompleteTrip),
           headers: {...authHeaders, 'Content-Type': 'application/json'},
           body: jsonEncode({
             'tripId': tripId,
             'actualFare': estFare,
             'actualDistance': estDist
-          })).timeout(const Duration(seconds: 10));
+          })).timeout(const Duration(seconds: 10)));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final pricing = data['pricing'] as Map<String, dynamic>? ?? {};
@@ -1651,7 +1718,7 @@ class _TripScreenState extends State<TripScreen>
                                           'Content-Type': 'application/json'
                                         },
                                         body: jsonEncode(
-                                            {'tripId': tripId, 'rating': i}));
+                                            {'tripId': tripId, 'rating': i})).timeout(const Duration(seconds: 10));
                                   } catch (_) {}
                                   setS(() => ratingSubmitted = true);
                                 },
@@ -1868,6 +1935,7 @@ class _TripScreenState extends State<TripScreen>
   }
 
   Future<void> _verifyDeliveryOtp(String otp) async {
+    if (!mounted) return;
     setState(() => _loading = true);
     final h = await AuthService.getHeaders();
     final tripId = _trip?['id'] ?? _trip?['tripId'] ?? '';
@@ -2434,8 +2502,8 @@ class _TripScreenState extends State<TripScreen>
                 color: Colors.black,
                 shape: BoxShape.circle,
               ),
-              child: Image.asset(
-                'assets/images/pilot_logo_white.png',
+              child: SvgPicture.asset(
+                'assets/images/jago_icon_white.svg',
                 fit: BoxFit.contain,
               ),
             ),
@@ -3019,6 +3087,13 @@ class _TripScreenState extends State<TripScreen>
     final step = _getStepInfo();
     final isOnTheWay = _status == 'in_progress' || _status == 'on_the_way';
     final isArrived = _status == 'arrived';
+    final needsSlideArrive =
+        _status == 'accepted' || _status == 'driver_assigned';
+
+    if (needsSlideArrive && !_loading) {
+      return _buildSlideToArriveBtn();
+    }
+
     final buttonColor = isOnTheWay
         ? JT.error
         : isArrived
@@ -3082,6 +3157,81 @@ class _TripScreenState extends State<TripScreen>
         ),
       ),
     );
+  }
+
+  Widget _buildSlideToArriveBtn() {
+    return LayoutBuilder(builder: (context, constraints) {
+      final trackWidth = constraints.maxWidth;
+      final maxSlide = (trackWidth - 60).clamp(0.0, double.infinity);
+      return Container(
+        margin: const EdgeInsets.only(top: 6),
+        height: 60,
+        child: Stack(
+          children: [
+            Container(
+              width: trackWidth,
+              decoration: BoxDecoration(
+                color: JT.primaryLight,
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: JT.primary.withValues(alpha: 0.2)),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                _nearPickup ? 'Slide to mark Arrived →' : 'Move closer to pickup →',
+                style: GoogleFonts.poppins(
+                  color: _nearPickup ? JT.primaryDark : JT.textSecondary,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            Positioned(
+              left: _arriveSlideOffset.clamp(0, maxSlide),
+              top: 0,
+              child: GestureDetector(
+                onHorizontalDragUpdate: (d) {
+                  setState(() {
+                    _arriveSlideOffset =
+                        (_arriveSlideOffset + d.delta.dx).clamp(0, maxSlide);
+                  });
+                },
+                onHorizontalDragEnd: (_) {
+                  if (!_nearPickup) {
+                    setState(() => _arriveSlideOffset = 0);
+                    _showSnack('Move within 100m of pickup to mark arrived.', error: true);
+                    return;
+                  }
+                  if (_arriveSlideOffset >= maxSlide * 0.82) {
+                    setState(() => _arriveSlideOffset = 0);
+                    HapticFeedback.heavyImpact();
+                    _nextStep();
+                  } else {
+                    setState(() => _arriveSlideOffset = 0);
+                  }
+                },
+                child: Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: JT.primary,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: JT.primary.withValues(alpha: 0.35),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.double_arrow_rounded,
+                      color: Colors.white, size: 24),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   // ── Quick action row ──────────────────────────────────────────────────────

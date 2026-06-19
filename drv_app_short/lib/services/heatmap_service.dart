@@ -39,11 +39,11 @@ class HeatmapZone {
 
   factory HeatmapZone.fromJson(Map<String, dynamic> j) => HeatmapZone(
     key: j['key']?.toString() ?? '',
-    lat: (j['lat'] ?? 0).toDouble(),
-    lng: (j['lng'] ?? 0).toDouble(),
+    lat: double.tryParse(j['lat']?.toString() ?? '0') ?? 0.0,
+    lng: double.tryParse(j['lng']?.toString() ?? '0') ?? 0.0,
     requestCount: (j['requestCount'] ?? 0) as int,
     activeDrivers: (j['activeDrivers'] ?? 0) as int,
-    demandScore: (j['demandScore'] ?? 0).toDouble(),
+    demandScore: double.tryParse(j['demandScore']?.toString() ?? '0') ?? 0.0,
     demandLevel: j['demandLevel']?.toString() ?? 'low',
     serviceBreakdown: Map<String, int>.from(
       (j['serviceBreakdown'] as Map? ?? {}).map((k, v) => MapEntry(k.toString(), (v ?? 0) as int))
@@ -94,9 +94,9 @@ class HeatmapSuggestion {
   });
 
   factory HeatmapSuggestion.fromJson(Map<String, dynamic> j) => HeatmapSuggestion(
-    lat: (j['lat'] ?? 0).toDouble(),
-    lng: (j['lng'] ?? 0).toDouble(),
-    distanceKm: (j['distanceKm'] ?? 0).toDouble(),
+    lat: double.tryParse(j['lat']?.toString() ?? '0') ?? 0.0,
+    lng: double.tryParse(j['lng']?.toString() ?? '0') ?? 0.0,
+    distanceKm: double.tryParse(j['distanceKm']?.toString() ?? '0') ?? 0.0,
     demandLevel: j['demandLevel']?.toString() ?? 'medium',
     earningMin: (j['earningMin'] ?? 0) as int,
     earningMax: (j['earningMax'] ?? 0) as int,

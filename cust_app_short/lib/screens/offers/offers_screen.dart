@@ -29,7 +29,7 @@ class _OffersScreenState extends State<OffersScreen> {
     try {
       final headers = await AuthService.getHeaders();
       final r = await http.get(Uri.parse(ApiConfig.customerOffers),
-          headers: headers);
+          headers: headers).timeout(const Duration(seconds: 8));
       if (r.statusCode == 200) {
         if (mounted) setState(() { _offers = jsonDecode(r.body); _loading = false; });
       } else {

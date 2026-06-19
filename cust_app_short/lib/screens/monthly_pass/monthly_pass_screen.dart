@@ -27,7 +27,7 @@ class _MonthlyPassScreenState extends State<MonthlyPassScreen> {
     setState(() => _loading = true);
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/customer/monthly-pass'), headers: headers);
+      final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/customer/monthly-pass'), headers: headers).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200 && mounted) {
         final d = jsonDecode(res.body);
         setState(() {
@@ -47,7 +47,7 @@ class _MonthlyPassScreenState extends State<MonthlyPassScreen> {
         Uri.parse('${ApiConfig.baseUrl}/api/app/customer/monthly-pass/buy'),
         headers: {...headers, 'Content-Type': 'application/json'},
         body: jsonEncode({'planName': planName}),
-      );
+      ).timeout(const Duration(seconds: 15));
       final body = jsonDecode(res.body);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(

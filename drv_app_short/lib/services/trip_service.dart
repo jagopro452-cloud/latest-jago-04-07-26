@@ -74,7 +74,7 @@ class TripService {
     } catch (e) { return {'error': e.toString()}; }
   }
 
-  static Future<Map<String, dynamic>> markArrived(String tripId) async {
+  static Future<Map<String, dynamic>> markArrived(String tripId, {double? lat, double? lng}) async {
     try {
       final headers = await AuthService.getHeaders();
       final res = await apiRetry(
@@ -84,7 +84,11 @@ class TripService {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
-            body: jsonEncode({'tripId': tripId})),
+            body: jsonEncode({
+              'tripId': tripId,
+              if (lat != null) 'lat': lat,
+              if (lng != null) 'lng': lng,
+            })),
       );
       return _safeJson(res);
     } catch (e) { return {'error': e.toString()}; }

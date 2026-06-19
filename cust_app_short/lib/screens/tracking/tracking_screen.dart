@@ -16,6 +16,7 @@ import '../../services/analytics_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/alarm_service.dart';
 import '../../services/call_service.dart';
+import '../../widgets/jago_map_markers.dart';
 import '../call/call_screen.dart';
 import '../chat/trip_chat_sheet.dart';
 
@@ -25,7 +26,8 @@ import 'trip_completion_screen.dart';
 
 class TrackingScreen extends StatefulWidget {
   final String tripId;
-  const TrackingScreen({super.key, required this.tripId});
+  final bool isParcel;
+  const TrackingScreen({super.key, required this.tripId, this.isParcel = false});
   @override
   State<TrackingScreen> createState() => _TrackingScreenState();
 }
@@ -36,6 +38,7 @@ class _TrackingScreenState extends State<TrackingScreen>
   GoogleMapController? _mapController;
   LatLng _center = const LatLng(17.3850, 78.4867);
   LatLng? _driverLatLng;
+  double _driverHeading = 0;
   String _status = 'searching';
   Map<String, dynamic>? _trip;
   double _walletPendingAmount =
@@ -54,7 +57,6 @@ class _TrackingScreenState extends State<TrackingScreen>
   Timer? _searchAbortTimer;
   bool _boostLoading = false;
   Timer? _nearbyDriversTimer;
-  final Map<String, BitmapDescriptor> _markerIconCache = {};
   List<Map<String, dynamic>> _nearbyDrivers = [];
 
   bool _isConnected = true;
@@ -84,8 +86,12 @@ class _TrackingScreenState extends State<TrackingScreen>
           _showStatusBanner('Waiting for connection...', Colors.orange);
         } else {
           _showStatusBanner('Reconnected!', const Color(0xFF10B981));
-          // Re-join trip room on every reconnect
-          _socket.trackTrip(widget.tripId);
+          // Re-join tracking room on every reconnect
+          if (widget.isParcel) {
+            _socket.trackParcel(widget.tripId);
+          } else {
+            _socket.trackTrip(widget.tripId);
+          }
           // Triple poll to reconcile state quickly
           _pollStatus();
           Future.delayed(const Duration(milliseconds: 800), _pollStatus);
@@ -107,7 +113,11 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   String _eventTripId(Map<String, dynamic> data) {
-    final direct = data['tripId'] ?? data['trip_id'] ?? data['id'];
+    final direct = data['tripId'] ??
+        data['trip_id'] ??
+        data['orderId'] ??
+        data['order_id'] ??
+        data['id'];
     if (direct != null && direct.toString().isNotEmpty) {
       return direct.toString();
     }
@@ -127,27 +137,146 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   bool _isLiveTripStatus(String status) {
-    return status == 'in_progress' || status == 'on_the_way';
+    return status == 'in_progress' ||
+        status == 'on_the_way' ||
+        status == 'in_transit' ||
+        status == 'picked_up';
+  }
+
+  Map<String, int> _statusRanks() {
+    return const {
+      'pending': 0,
+      'searching': 0,
+      'driver_assigned': 1,
+      'accepted': 2,
+      'picked_up': 3,
+      'arrived': 3,
+      'in_progress': 4,
+      'on_the_way': 4,
+      'in_transit': 4,
+      'completed': 5,
+      'cancelled': 5,
+    };
+  }
+
+  Map<String, dynamic> _normalizeParcelOrder(Map<String, dynamic> order) {
+    final drops = order['drops'] is List
+        ? List<Map<String, dynamic>>.from(
+            (order['drops'] as List).map((e) => Map<String, dynamic>.from(e as Map)))
+        : <Map<String, dynamic>>[];
+    final progress = order['progress'] is Map
+        ? Map<String, dynamic>.from(order['progress'] as Map)
+        : <String, dynamic>{};
+    final currentStop = progress['currentStop'] is Map
+        ? Map<String, dynamic>.from(progress['currentStop'] as Map)
+        : (drops.isNotEmpty ? drops.last : null);
+    final dest = currentStop ?? (drops.isNotEmpty ? drops.last : null);
+
+    return {
+      'id': order['id'],
+      'currentStatus': order['currentStatus'] ?? order['current_status'] ?? _status,
+      'driverName': order['driverName'] ?? order['driver_name'],
+      'driverPhone': order['driverPhone'] ?? order['driver_phone'],
+      'driverLat': order['driverLat'] ?? order['driver_lat'],
+      'driverLng': order['driverLng'] ?? order['driver_lng'],
+      'pickupLat': order['pickupLat'] ?? order['pickup_lat'],
+      'pickupLng': order['pickupLng'] ?? order['pickup_lng'],
+      'pickupAddress': order['pickupAddress'] ?? order['pickup_address'],
+      'pickupShortName': order['pickupShortName'] ?? order['pickup_short_name'],
+      'destinationLat': dest?['lat'] ?? dest?['dropLat'] ?? order['dropLat'] ?? order['drop_lat'],
+      'destinationLng': dest?['lng'] ?? dest?['dropLng'] ?? order['dropLng'] ?? order['drop_lng'],
+      'destinationAddress':
+          dest?['address'] ?? dest?['dropAddress'] ?? order['dropAddress'] ?? order['drop_address'],
+      'destinationShortName': dest?['receiverName'] ?? order['receiverName'],
+      'estimatedFare': order['totalFare'] ?? order['total_fare'] ?? order['estimatedFare'],
+      'vehicleName': order['vehicleCategory'] ?? order['vehicle_category'],
+      'type': 'parcel',
+      'tripType': 'parcel',
+      'parcelDrops': drops,
+      'parcelProgress': progress,
+    };
+  }
+
+  void _onDriverLocationUpdate(Map<String, dynamic> data) {
+    if (!mounted) return;
+    final lat = double.tryParse(data['lat']?.toString() ?? '');
+    final lng = double.tryParse(data['lng']?.toString() ?? '');
+    if (lat != null && lng != null) {
+      final nextLatLng = LatLng(lat, lng);
+      final heading = _resolveHeading(data, _driverLatLng, nextLatLng);
+      if (!widget.isParcel) _checkArrivingStatus(lat, lng);
+      setState(() {
+        _driverLatLng = nextLatLng;
+        _driverHeading = heading;
+        _updateMapMarkers();
+        _fetchRouteForStatus();
+      });
+    }
+  }
+
+  void _applyParcelStatusEvent(Map<String, dynamic> data) {
+    if (!_eventMatchesTrip(data)) return;
+    final newStatus = data['status']?.toString();
+    if (newStatus == null || newStatus.isEmpty) return;
+
+    final statusRank = _statusRanks();
+    final incomingRank = statusRank[newStatus] ?? 0;
+    final currentRank = statusRank[_status] ?? 0;
+    if (incomingRank < currentRank) return;
+
+    if (newStatus != _status) {
+      if (newStatus != 'searching') _stopDispatchRecovery();
+      _statusVersion++;
+      setState(() {
+        _status = newStatus;
+        final update = <String, dynamic>{};
+        if (data['driverName'] != null) update['driverName'] = data['driverName'];
+        if (data['driverPhone'] != null) update['driverPhone'] = data['driverPhone'];
+        if (data['driverId'] != null) update['driverId'] = data['driverId'];
+        _trip = (_trip != null) ? {..._trip!, ...update} : update;
+      });
+      _handleStatusTransition(newStatus);
+      HapticFeedback.lightImpact();
+      _pollStatus();
+    }
+
+    if (newStatus == 'completed' || newStatus == 'cancelled') {
+      _pollTimer?.cancel();
+      _pollStatus();
+    }
   }
 
   void _connectSocket() {
     CallService().init();
+    if (widget.isParcel) {
+      _socket.trackParcel(widget.tripId);
+      _subs.add(_socket.onParcelDriverLocation.listen(_onDriverLocationUpdate));
+      _subs.add(_socket.onParcelStatus.listen((data) {
+        if (data == null) return;
+        try {
+          _applyParcelStatusEvent(Map<String, dynamic>.from(data));
+        } catch (e, stack) {
+          debugPrint('[SOCKET] Error in onParcelStatus: $e\n$stack');
+        }
+      }));
+      _subs.add(_socket.onParcelCancelled.listen((data) {
+        if (!mounted) return;
+        if (!_eventMatchesTrip(Map<String, dynamic>.from(data))) return;
+        setState(() => _status = 'cancelled');
+        _pollTimer?.cancel();
+        _showStatusBanner('Parcel delivery was cancelled', Colors.red);
+      }));
+      _socket.connect(ApiConfig.socketUrl).then((_) {
+        _socket.trackParcel(widget.tripId);
+        _pollStatus();
+      });
+      return;
+    }
+
     // Eagerly join the trip room
     _socket.trackTrip(widget.tripId);
 
-    _subs.add(_socket.onDriverLocation.listen((data) {
-      if (!mounted) return;
-      final lat = double.tryParse(data['lat']?.toString() ?? '');
-      final lng = double.tryParse(data['lng']?.toString() ?? '');
-      if (lat != null && lng != null) {
-        _checkArrivingStatus(lat, lng);
-        setState(() {
-          _driverLatLng = LatLng(lat, lng);
-          _updateMapMarkers();
-          _fetchRouteForStatus(); // Keep route updated as driver moves
-        });
-      }
-    }));
+    _subs.add(_socket.onDriverLocation.listen(_onDriverLocationUpdate));
 
     _subs.add(_socket.onTripStatus.listen((data) {
       if (data == null) return;
@@ -224,6 +353,12 @@ class _TrackingScreenState extends State<TrackingScreen>
                   double.tryParse(update['driverLng']?.toString() ?? '');
               if (dLat != null && dLng != null && dLat != 0) {
                 _driverLatLng = LatLng(dLat, dLng);
+                _driverHeading = double.tryParse(
+                      driverMap['heading']?.toString() ??
+                          driverMap['bearing']?.toString() ??
+                          '',
+                    ) ??
+                    _driverHeading;
               }
             }
 
@@ -324,7 +459,13 @@ class _TrackingScreenState extends State<TrackingScreen>
           update['driverVehicleModel'] =
               data['driverVehicleModel'] ?? data['driver_vehicle_model'];
           update['vehicleName'] =
-              data['vehicleName'] ?? data['vehicle_name'] ?? 'Pilot';
+              data['vehicleName'] ??
+              data['vehicle_name'] ??
+              data['vehicleCategory'] ??
+              data['vehicle_category'] ??
+              _trip?['vehicleCategory'] ??
+              _trip?['vehicleCategoryName'] ??
+              'cab';
         }
 
         if (_trip != null) {
@@ -485,13 +626,22 @@ class _TrackingScreenState extends State<TrackingScreen>
     } catch (_) {}
   }
 
+  String _resolveVehicleLabel() {
+    final booked = (_trip?['vehicleCategory'] ??
+            _trip?['vehicleCategoryName'] ??
+            _trip?['vehicleType'] ??
+            _trip?['vehicle_type'] ??
+            '')
+        .toString();
+    final assigned = (_trip?['vehicleName'] ?? _trip?['vehicle_name'] ?? '').toString();
+    if (assigned.isNotEmpty && assigned.toLowerCase() != 'pilot') return assigned;
+    if (booked.isNotEmpty) return booked;
+    return 'cab';
+  }
+
   Future<BitmapDescriptor> _getMarkerIcon(String type,
       {bool isSearching = false}) async {
-    final key = "${type}_$isSearching";
-    if (_markerIconCache.containsKey(key)) return _markerIconCache[key]!;
-    final icon = await _drawMarkerIcon(type, isSearching: isSearching);
-    _markerIconCache[key] = icon;
-    return icon;
+    return JagoMapMarkers.vehicle(type, searching: isSearching);
   }
 
   Future<BitmapDescriptor> _drawMarkerIcon(String type,
@@ -560,6 +710,9 @@ class _TrackingScreenState extends State<TrackingScreen>
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.bytes(data!.buffer.asUint8List());
   }
+
+  Future<BitmapDescriptor> _destinationMarkerIcon() =>
+      JagoMapMarkers.destination();
 
   void _handleStatusTransition(String newStatus) {
     _restartPollTimer();
@@ -756,12 +909,14 @@ class _TrackingScreenState extends State<TrackingScreen>
     if (_driverLatLng != null &&
         _status != 'searching' &&
         _status != 'cancelled') {
-      final vName = (_trip?['vehicleName'] ?? 'Pilot').toString();
+      final vName = _resolveVehicleLabel();
       newMarkers.add(Marker(
         markerId: const MarkerId('driver'),
         position: _driverLatLng!,
         icon: await _getMarkerIcon(vName),
         anchor: const Offset(0.5, 0.5),
+        rotation: _driverHeading,
+        flat: true,
       ));
       if (_status != 'completed') {
         _mapController
@@ -785,7 +940,8 @@ class _TrackingScreenState extends State<TrackingScreen>
       newMarkers.add(Marker(
         markerId: const MarkerId('destination'),
         position: LatLng(dLat, dLng),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        icon: await _destinationMarkerIcon(),
+        anchor: const Offset(0.5, 0.9),
       ));
 
       if (_driverLatLng != null && _mapController != null) {
@@ -818,6 +974,8 @@ class _TrackingScreenState extends State<TrackingScreen>
           position: LatLng(dLat, dLng),
           icon: await _getMarkerIcon(vName, isSearching: true),
           anchor: const Offset(0.5, 0.5),
+          rotation: double.tryParse(d['heading']?.toString() ?? '0') ?? 0,
+          flat: true,
         ));
       }
     }
@@ -864,6 +1022,34 @@ class _TrackingScreenState extends State<TrackingScreen>
     return 12742 * math.asin(math.sqrt(a));
   }
 
+  double _resolveHeading(
+    Map<String, dynamic> data,
+    LatLng? previous,
+    LatLng next,
+  ) {
+    final incoming = double.tryParse(
+      data['heading']?.toString() ?? data['bearing']?.toString() ?? '',
+    );
+    if (incoming != null && incoming.isFinite && incoming != 0) {
+      return incoming;
+    }
+    if (previous == null) return _driverHeading;
+    return _bearingBetween(previous, next);
+  }
+
+  double _bearingBetween(LatLng from, LatLng to) {
+    final fromLat = from.latitude * math.pi / 180;
+    final fromLng = from.longitude * math.pi / 180;
+    final toLat = to.latitude * math.pi / 180;
+    final toLng = to.longitude * math.pi / 180;
+    final deltaLng = toLng - fromLng;
+    final y = math.sin(deltaLng) * math.cos(toLat);
+    final x = math.cos(fromLat) * math.sin(toLat) -
+        math.sin(fromLat) * math.cos(toLat) * math.cos(deltaLng);
+    final bearing = math.atan2(y, x) * 180 / math.pi;
+    return (bearing + 360) % 360;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -878,7 +1064,9 @@ class _TrackingScreenState extends State<TrackingScreen>
     _pulseCtrl.dispose();
     _tts.stop();
     _mapController?.dispose();
-    // Don't disconnect socket — it's a shared singleton
+    // Leave the trip socket room — shared singleton stays connected for other trips
+    _socket.stopTrackingTrip(widget.tripId);
+    if (widget.isParcel) _socket.stopTrackingParcel(widget.tripId);
     super.dispose();
   }
 
@@ -888,7 +1076,11 @@ class _TrackingScreenState extends State<TrackingScreen>
       if (!_socket.isConnected) {
         _socket.connect(ApiConfig.socketUrl);
       }
-      _socket.trackTrip(widget.tripId);
+      if (widget.isParcel) {
+        _socket.trackParcel(widget.tripId);
+      } else {
+        _socket.trackTrip(widget.tripId);
+      }
       _pollStatus();
     }
   }
@@ -979,7 +1171,11 @@ class _TrackingScreenState extends State<TrackingScreen>
       if (_retryCount > 4 && _retryCount % gap != 0) return;
       debugPrint(
           '[DISPATCH] Search retry #$_retryCount: rejoining room and reconciling tripId=${widget.tripId}');
-      _socket.trackTrip(widget.tripId);
+      if (widget.isParcel) {
+        _socket.trackParcel(widget.tripId);
+      } else {
+        _socket.trackTrip(widget.tripId);
+      }
       _pollStatus();
     });
     _searchAbortTimer = Timer(const Duration(minutes: 5), () {
@@ -987,8 +1183,13 @@ class _TrackingScreenState extends State<TrackingScreen>
       debugPrint(
           '[DISPATCH] Search timeout: cancelling tripId=${widget.tripId}');
       _showStatusBanner(
-          'No pilots accepted the ride. Please try again.', Colors.red);
-      _cancelTrip('No pilot accepted within 5 minutes');
+          widget.isParcel
+              ? 'No delivery partner accepted. Please try again.'
+              : 'No pilots accepted the ride. Please try again.',
+          Colors.red);
+      _cancelTrip(widget.isParcel
+          ? 'No delivery partner accepted within 5 minutes'
+          : 'No pilot accepted within 5 minutes');
     });
   }
 
@@ -1259,7 +1460,9 @@ class _TrackingScreenState extends State<TrackingScreen>
   void _restartPollTimer() {
     _pollTimer?.cancel();
     if (_status == 'completed' || _status == 'cancelled') return;
-    final interval = _status == 'in_progress' || _status == 'on_the_way'
+    final interval = _status == 'in_progress' ||
+            _status == 'on_the_way' ||
+            _status == 'in_transit'
         ? const Duration(seconds: 10)
         : const Duration(seconds: 5);
     _pollTimer = Timer.periodic(interval, (_) => _pollStatus());
@@ -1272,7 +1475,9 @@ class _TrackingScreenState extends State<TrackingScreen>
       final headers = await AuthService.getHeaders();
       final res = await http
           .get(
-            Uri.parse('${ApiConfig.trackTrip}/${widget.tripId}'),
+            Uri.parse(widget.isParcel
+                ? ApiConfig.parcelTrack(widget.tripId)
+                : '${ApiConfig.trackTrip}/${widget.tripId}'),
             headers: headers,
           )
           .timeout(const Duration(seconds: 10));
@@ -1282,22 +1487,19 @@ class _TrackingScreenState extends State<TrackingScreen>
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        final trip = data['trip'];
-        if (trip != null) {
+        final Map<String, dynamic>? tripRaw = widget.isParcel
+            ? _normalizeParcelOrder(
+                Map<String, dynamic>.from(data['order'] as Map? ?? {}))
+            : (data['trip'] is Map
+                ? Map<String, dynamic>.from(data['trip'] as Map)
+                : null);
+        if (tripRaw != null && tripRaw.isNotEmpty) {
+          final trip = tripRaw;
           final rawStatus = trip['currentStatus']?.toString() ?? _status;
           final resolvedStatus =
               rawStatus == 'payment_pending' ? 'completed' : rawStatus;
 
-          const statusRank = {
-            'searching': 0,
-            'driver_assigned': 1,
-            'accepted': 2,
-            'arrived': 3,
-            'in_progress': 4,
-            'on_the_way': 4,
-            'completed': 5,
-            'cancelled': 5,
-          };
+          final statusRank = _statusRanks();
 
           final currentRank = statusRank[_status] ?? 0;
           final incomingRank = statusRank[resolvedStatus] ?? 0;
@@ -1387,6 +1589,27 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Future<void> _cancelTrip(String reason) async {
+    if (widget.isParcel) {
+      _socket.cancelParcel(widget.tripId, reason: reason);
+      try {
+        final headers = await AuthService.getHeaders();
+        await http
+            .post(
+              Uri.parse(ApiConfig.parcelCancel(widget.tripId)),
+              headers: headers,
+              body: jsonEncode({'reason': reason}),
+            )
+            .timeout(const Duration(seconds: 10));
+      } catch (_) {}
+      if (!mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+        (_) => false,
+      );
+      return;
+    }
+
     // Cancel via socket first
     _socket.cancelTrip(_trip?['id']?.toString() ?? widget.tripId);
     // Also HTTP for persistence
@@ -1396,7 +1619,7 @@ class _TrackingScreenState extends State<TrackingScreen>
       final res = await http.post(Uri.parse(ApiConfig.cancelTrip),
           headers: headers,
           body: jsonEncode(
-              {'tripId': _trip?['id'] ?? widget.tripId, 'reason': reason}));
+              {'tripId': _trip?['id'] ?? widget.tripId, 'reason': reason})).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         walletRefund = double.tryParse(data['walletRefund']?.toString() ?? '');
@@ -2410,6 +2633,55 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Map<String, dynamic> _getStatusInfo(String status) {
+    if (widget.isParcel) {
+      switch (status) {
+        case 'searching':
+        case 'pending':
+          return {
+            'label': 'Finding a delivery partner...',
+            'icon': Icons.radar_rounded,
+            'color': JT.primary,
+          };
+        case 'driver_assigned':
+        case 'accepted':
+          return {
+            'label': 'Partner assigned — heading to pickup',
+            'icon': Icons.local_shipping_rounded,
+            'color': JT.primary,
+          };
+        case 'picked_up':
+          return {
+            'label': 'Parcel picked up',
+            'icon': Icons.inventory_2_rounded,
+            'color': JT.success,
+          };
+        case 'in_transit':
+          return {
+            'label': 'Parcel on the way',
+            'icon': Icons.navigation_rounded,
+            'color': JT.primary,
+          };
+        case 'completed':
+          return {
+            'label': 'Parcel delivered',
+            'icon': Icons.check_circle_rounded,
+            'color': JT.success,
+          };
+        case 'cancelled':
+          return {
+            'label': 'Delivery cancelled',
+            'icon': Icons.cancel_rounded,
+            'color': JT.primaryDark,
+          };
+        default:
+          return {
+            'label': 'Tracking your parcel...',
+            'icon': Icons.hourglass_empty_rounded,
+            'color': const Color(0xFF94A3B8),
+          };
+      }
+    }
+
     switch (status) {
       case 'searching':
         return {

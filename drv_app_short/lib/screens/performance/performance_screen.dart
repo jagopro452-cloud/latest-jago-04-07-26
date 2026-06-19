@@ -28,9 +28,9 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
     setState(() => _loading = true);
     final headers = await AuthService.getHeaders();
     final results = await Future.wait([
-      http.get(Uri.parse(ApiConfig.performance), headers: headers),
-      http.get(Uri.parse(ApiConfig.driverDashboard), headers: headers),
-      http.get(Uri.parse(ApiConfig.weeklyEarnings), headers: headers),
+      http.get(Uri.parse(ApiConfig.performance), headers: headers).timeout(const Duration(seconds: 10)),
+      http.get(Uri.parse(ApiConfig.driverDashboard), headers: headers).timeout(const Duration(seconds: 10)),
+      http.get(Uri.parse(ApiConfig.weeklyEarnings), headers: headers).timeout(const Duration(seconds: 10)),
     ]);
     if (mounted) {
       setState(() {

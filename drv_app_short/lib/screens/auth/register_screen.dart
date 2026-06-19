@@ -47,6 +47,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _vehicleNumCtrl = TextEditingController();
   String _vehicleType = 'bike';
 
+  static const List<MapEntry<String, String>> _vehicleTypeOptions = [
+    MapEntry('bike', 'Bike (2-wheeler)'),
+    MapEntry('auto', 'Auto Rickshaw'),
+    MapEntry('mini', 'Mini Car (4 Seater)'),
+    MapEntry('sedan', 'Sedan (4 Seater)'),
+    MapEntry('car', 'Car (4 Seater)'),
+    MapEntry('suv', 'SUV (6 Seater)'),
+    MapEntry('xl', 'XL / Innova (7 Seater)'),
+  ];
+
   // Step 5: Vehicle Documents
   File? _rcPhoto;
   File? _insurancePhoto;
@@ -124,21 +134,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _submit() async {
     setState(() => _loading = true);
     try {
-      // Ensure driver has an account and token. If not logged in, register first.
-      String? token = await AuthService.getToken();
-      if (token == null || token.isEmpty) {
-        final phone = _phoneCtrl.text.trim();
-        final password = _passwordCtrl.text;
-        final name = _nameCtrl.text.trim();
-        if (phone.length != 10) throw Exception('Enter a valid 10-digit phone number');
-        if (!_isStrongPassword(password)) throw Exception('Use 8+ chars with upper, lower and number');
-        if (name.length < 2) throw Exception('Please enter your full name');
-        final regRes = await AuthService.registerWithPassword(phone, password, name);
-        if (regRes['success'] != true) {
-          throw Exception(regRes['message'] ?? 'Registration failed. Try again.');
+      final phone = _phoneCtrl.text.trim();
+      final password = _passwordCtrl.text;
+      final name = _nameCtrl.text.trim();
+      if (phone.length != 10) throw Exception('Enter a valid 10-digit phone number');
+      if (!_isStrongPassword(password)) throw Exception('Use 8+ chars with upper, lower and number');
+      if (name.length < 2) throw Exception('Please enter your full name');
+
+      // Always get a fresh valid session before submitting.
+      // Covers: first registration, re-submission after token expiry, account already exists.
+      final regRes = await AuthService.registerWithPassword(phone, password, name);
+      if (regRes['success'] != true) {
+        final msg = regRes['message']?.toString() ?? '';
+        if (msg.toLowerCase().contains('already') || msg.toLowerCase().contains('exist')) {
+          // Account exists — log in to refresh the session token
+          final loginRes = await AuthService.loginWithPassword(phone, password);
+          if (loginRes['token'] == null) {
+            throw Exception(loginRes['message'] ?? 'Account exists but login failed. Check your password.');
+          }
+        } else {
+          throw Exception(msg.isNotEmpty ? msg : 'Registration failed. Try again.');
         }
-        token = await AuthService.getToken();
       }
+      // A fresh, valid token is now in SecureTokenStore
 
       final authHeaders = await AuthService.getHeaders();
       final headers = {...authHeaders, 'Content-Type': 'application/json'};
@@ -371,7 +389,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       const SizedBox(height: 16),
       _input('Vehicle Number', _vehicleNumCtrl, Icons.numbers),
       const SizedBox(height: 16),
-      _dropdown('Vehicle Type', _vehicleType, ['bike', 'auto', 'car', 'mini', 'sedan', 'suv', 'xl'], (v) => setState(() => _vehicleType = v!)),
+      _vehicleTypeDropdown(),
     ]);
   }
 
@@ -598,6 +616,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ? Icon(Icons.check_circle, color: JT.success)
           : Text('Upload', style: JT.body.copyWith(color: JT.primary)),
       onTap: onTap,
+    );
+  }
+
+  Widget _vehicleTypeDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: JT.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: JT.border),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _vehicleType,
+          isExpanded: true,
+          dropdownColor: JT.surface,
+          items: _vehicleTypeOptions
+              .map((entry) => DropdownMenuItem(
+                    value: entry.key,
+                    child: Text(entry.value, style: JT.bodyPrimary),
+                  ))
+              .toList(),
+          onChanged: (v) {
+            if (v != null) setState(() => _vehicleType = v);
+          },
+        ),
+      ),
     );
   }
 

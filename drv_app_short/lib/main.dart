@@ -11,6 +11,7 @@ import 'services/analytics_service.dart';
 import 'services/fcm_service.dart';
 import 'services/localization_service.dart';
 import 'services/pinned_http_client.dart';
+import 'services/secure_token_store.dart';
 import 'package:flutter_jailbreak_detection/flutter_jailbreak_detection.dart';
 
 // Global navigator key — used by FCM service to navigate after notification tap
@@ -44,6 +45,8 @@ Future<void> saveThemePreference(String pref) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   installCertificatePinning();
+  // Migrate auth_token from SharedPreferences → secure storage (one-time, safe to repeat)
+  await SecureTokenStore.migrateFromSharedPreferences();
   await loadThemePreference();
   await L.init();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);

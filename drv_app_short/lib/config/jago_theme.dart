@@ -14,6 +14,8 @@ import 'app_theme.dart';
 class JT {
   // THEME COLORS — Clean Blue + White (mapped from AppColors)
   static const Color primary     = AppColors.primary;       // #2D8CFF blue
+  static const Color primaryLight = AppColors.primaryLight;
+  static const Color primaryDark  = AppColors.primaryDark;
   static const Color secondary   = AppColors.secondary;     // #5BABFF light blue
   static const Color bg          = AppColors.bg;            // #FFFFFF white
   static const Color bgSoft      = AppColors.surface;       // #F8FAFE soft surface
@@ -22,6 +24,7 @@ class JT {
   static const Color border      = AppColors.border;        // #E5E9F0
   static const Color textPrimary = AppColors.textPrimary;   // #111827 dark
   static const Color textSecondary = AppColors.textSecondary; // #6B7280
+  static const Color textTertiary  = AppColors.textTertiary;
   static const Color iconInactive  = AppColors.textTertiary;   // #9CA3AF
   static const Color error   = AppColors.error;             // #DC2626
   static const Color success = AppColors.success;           // #16A34A
@@ -61,20 +64,14 @@ class JT {
     );
   }
 
-  // LOGOS — Pilot branding
+  // LOGOS — Pilot branding (bundled SVG assets)
   static Widget logoBlue({double height = 36}) =>
-      ColorFiltered(
-        colorFilter: const ColorFilter.mode(Color(0xFF2D8CFF), BlendMode.srcIn),
-        child: Image.asset('assets/images/pilot_logo_white.png', height: height, fit: BoxFit.contain),
-      );
+      SvgPicture.asset('assets/images/pilot_logo_full.svg', height: height, fit: BoxFit.contain);
 
   static Widget logoPilot({double height = 36}) =>
-      ColorFiltered(
-        colorFilter: const ColorFilter.mode(Color(0xFF2D8CFF), BlendMode.srcIn),
-        child: Image.asset('assets/images/pilot_logo_white.png', height: height, fit: BoxFit.contain),
-      );
+      SvgPicture.asset('assets/images/pilot_logo_full.svg', height: height, fit: BoxFit.contain);
 
   static Widget logoWhite({double height = 36}) =>
-      Image.asset('assets/images/pilot_logo_white.png', height: height, fit: BoxFit.contain);
+      SvgPicture.asset('assets/images/pilot_logo_full_white.svg', height: height, fit: BoxFit.contain);
 }
 

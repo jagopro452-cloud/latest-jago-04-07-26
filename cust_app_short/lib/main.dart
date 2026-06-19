@@ -13,6 +13,7 @@ import 'services/analytics_service.dart';
 import 'services/fcm_service.dart';
 import 'services/localization_service.dart';
 import 'services/pinned_http_client.dart';
+import 'services/secure_token_store.dart';
 import 'package:flutter_jailbreak_detection/flutter_jailbreak_detection.dart';
 import 'screens/booking/voice_booking_screen.dart';
 
@@ -47,6 +48,8 @@ Future<void> saveThemePreference(String pref) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   installCertificatePinning();
+  // Migrate auth_token from SharedPreferences → secure storage (one-time, safe to repeat)
+  await SecureTokenStore.migrateFromSharedPreferences();
   await loadThemePreference();
   await L.init();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -142,8 +145,7 @@ class _JagoCustomerAppState extends State<JagoCustomerApp> {
 
   Future<void> _openVoiceBookingIfAllowed() async {
     if (_voiceRouteOpen) return;
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
+    final token = await SecureTokenStore.read();
     if (token == null || token.isEmpty) return;
     final nav = _navKey.currentState;
     if (nav == null) return;

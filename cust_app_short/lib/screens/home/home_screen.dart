@@ -11,6 +11,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
+import '../../widgets/vehicle_artwork.dart';
 import '../../services/auth_service.dart';
 import '../../services/socket_service.dart';
 import '../history/trips_history_screen.dart';
@@ -19,6 +20,7 @@ import '../profile/profile_screen.dart';
 import '../booking/booking_screen.dart';
 import '../booking/map_location_picker.dart';
 import '../tracking/tracking_screen.dart';
+import '../tracking/trip_completion_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../booking/intercity_booking_screen.dart';
 import '../offers/offers_screen.dart';
@@ -31,10 +33,8 @@ import '../booking/location_screen.dart';
 import '../booking/premium_location_screen.dart';
 import '../../services/trip_service.dart';
 import '../auth/login_screen.dart';
-import '../b2b/b2b_login_screen.dart';
 import '../outstation_pool/outstation_pool_screen.dart';
 import '../car_sharing/car_sharing_screen.dart';
-import 'modern_components.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -58,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<dynamic> _savedPlaces = [];
   List<Map<String, dynamic>> _recentTrips = [];
   Map<String, dynamic>? _activeTrip;
+  Map<String, dynamic>? _activeParcel;
   StreamSubscription? _driverAssignedSub;
   StreamSubscription? _tripCancelledSub;
   StreamSubscription? _tripStatusSub;
@@ -73,7 +74,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _bannerIndex = 0;
   Timer? _bannerTimer;
   final PageController _bannerPageCtrl = PageController();
-  Map<String, bool> _featureFlags = {};
 
   // ── Live Map state ────────────────────────────────────────────────────────
   GoogleMapController? _mapController;
@@ -115,7 +115,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _checkPendingFcmNotification());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkActiveTrip());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkActiveTripAndRecovery());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkActiveParcel());
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowTutorial());
     // Start nearby drivers polling (10s — battery-optimised, still smooth enough)
     _nearbyDriversTimer = Timer.periodic(
@@ -198,26 +199,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _fetchFeatureFlags() async {
     try {
       final r = await http
-          .get(Uri.parse(ApiConfig.featureFlags))
+          .get(Uri.parse('${ApiConfig.baseUrl}/api/app/feature-flags'))
           .timeout(const Duration(seconds: 6));
       if (r.statusCode == 200 && mounted) {
-        final data = jsonDecode(r.body) as Map<String, dynamic>;
-        final raw = data['flags'] ?? data['featureFlags'] ?? data;
-        if (raw is Map) {
-          final parsed = <String, bool>{};
-          raw.forEach((k, v) {
-            if (v is bool) parsed[k.toString()] = v;
-            else if (v is int) parsed[k.toString()] = v != 0;
-            else if (v is String) parsed[k.toString()] = v == 'true' || v == '1';
-          });
-          setState(() => _featureFlags = parsed);
-        }
+        // feature flags loaded (unused by current UI)
       }
     } catch (_) {}
   }
-
-  bool _flag(String key, {bool defaultValue = true}) =>
-      _featureFlags.containsKey(key) ? _featureFlags[key]! : defaultValue;
 
   // ── LIVE MAP: Nearby Drivers ─────────────────────────────────────────────
 
@@ -374,6 +362,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               context,
               MaterialPageRoute(
                   builder: (_) => TrackingScreen(tripId: tripId)));
+        } else if (type == 'trip_completed') {
+          try {
+            final verifyHeaders = await AuthService.getHeaders();
+            final tripCheck = await http.get(
+              Uri.parse('${ApiConfig.trackTrip}/$tripId'),
+              headers: verifyHeaders,
+            );
+            if (tripCheck.statusCode != 200) return;
+            final td = jsonDecode(tripCheck.body);
+            final trip = td['trip'] as Map<String, dynamic>?;
+            if (trip == null) return;
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TripCompletionScreen(trip: trip),
+              ),
+            );
+          } catch (_) {}
         }
       }
     } catch (_) {}
@@ -400,8 +407,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (status == 'searching') {
               _startSearchingTimer(trip['id']?.toString() ?? '');
             }
-            // Fix 7: if driver already assigned/in-progress, go straight to TrackingScreen
-            if (['accepted', 'arrived', 'on_the_way', 'driver_assigned']
+            // Restore tracking for active trips including searching state
+            if (['accepted', 'arrived', 'on_the_way', 'in_progress', 'driver_assigned', 'searching']
                 .contains(status)) {
               final tripId = trip['id']?.toString() ?? '';
               if (tripId.isNotEmpty && mounted) {
@@ -415,6 +422,99 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             }
           }
         }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkActiveTripAndRecovery() async {
+    await _checkActiveTrip();
+    if (!mounted) return;
+    if (_activeTrip != null) return;
+    await _checkPendingRecovery();
+  }
+
+  Future<void> _checkPendingRecovery() async {
+    if (_activeTrip != null) return;
+    try {
+      final headers = await AuthService.getHeaders();
+      final pendingRes = await http
+          .get(Uri.parse(ApiConfig.ridePendingRecovery), headers: headers)
+          .timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (pendingRes.statusCode == 401) {
+        _handleUnauthorized();
+        return;
+      }
+      if (pendingRes.statusCode != 200) return;
+      final pendingData = jsonDecode(pendingRes.body) as Map<String, dynamic>;
+      if (pendingData['pending'] != true) return;
+
+      final bookingIntentId = pendingData['bookingIntentId']?.toString() ?? '';
+      if (bookingIntentId.isEmpty) return;
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Completing your paid booking…')),
+        );
+      }
+
+      final recoverRes = await http
+          .post(
+            Uri.parse(ApiConfig.rideRecoverBooking),
+            headers: headers,
+            body: jsonEncode({'bookingIntentId': bookingIntentId}),
+          )
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      if (recoverRes.statusCode == 401) {
+        _handleUnauthorized();
+        return;
+      }
+      if (recoverRes.statusCode != 200 && recoverRes.statusCode != 409) return;
+
+      final recoverData = jsonDecode(recoverRes.body) as Map<String, dynamic>;
+      final tripId = recoverData['tripId']?.toString() ??
+          recoverData['trip']?['id']?.toString() ??
+          '';
+      if (tripId.isNotEmpty && mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => TrackingScreen(tripId: tripId)),
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkActiveParcel() async {
+    if (_activeTrip != null) return;
+    try {
+      final headers = await AuthService.getHeaders();
+      final r = await http.get(Uri.parse(ApiConfig.activeBooking), headers: headers);
+      if (!mounted) return;
+      if (r.statusCode == 401) {
+        _handleUnauthorized();
+        return;
+      }
+      if (r.statusCode != 200) return;
+      final data = jsonDecode(r.body);
+      if (data['bookingType']?.toString() != 'parcel') return;
+      final booking = data['booking'] as Map<String, dynamic>?;
+      if (booking == null) return;
+      final status = booking['currentStatus']?.toString() ?? '';
+      if (status == 'completed' || status == 'cancelled') return;
+
+      setState(() => _activeParcel = booking);
+      final orderId = booking['id']?.toString() ?? '';
+      if (orderId.isEmpty || !mounted) return;
+
+      if (['accepted', 'driver_assigned', 'picked_up', 'in_transit', 'searching', 'pending']
+          .contains(status)) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TrackingScreen(tripId: orderId, isParcel: true),
+          ),
+        );
       }
     } catch (_) {}
   }
@@ -460,7 +560,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         setState(() => _activeTrip = trip);
         // Driver accepted while socket was down → navigate to tracking
-        if (['accepted', 'arrived', 'on_the_way', 'driver_assigned']
+        if (['accepted', 'arrived', 'on_the_way', 'in_progress', 'driver_assigned']
             .contains(status)) {
           _statePollTimer?.cancel();
           _searchingTimer?.cancel();
@@ -666,12 +766,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      // App went to background — pause polls to save battery
-      // Socket remains connected so trip events still arrive via socket
+      // App went to background — pause the nearby-drivers poll to save battery
       _nearbyDriversTimer?.cancel();
       _nearbyDriversTimer = null;
-      _statePollTimer?.cancel();
-      _statePollTimer = null;
     } else if (state == AppLifecycleState.resumed) {
       // App came back to foreground — refresh pickup location and restart polling
       _getLocation();
@@ -679,11 +776,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _nearbyDriversTimer = Timer.periodic(
             const Duration(seconds: 10), (_) => _fetchNearbyDrivers());
         _fetchNearbyDrivers(); // refresh immediately on resume
-      }
-      // Resume trip state poll if actively searching
-      if (_activeTrip != null && _statePollTimer == null) {
-        _statePollTimer = Timer.periodic(
-            const Duration(seconds: 5), (_) => _pollTripState());
       }
     }
   }
@@ -840,8 +932,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 16),
       );
       _fetchNearbyDrivers();
-      // Re-fetch location-filtered services now that coordinates are valid
-      if (_activeServices.isEmpty) _fetchActiveServices();
     } catch (_) {
       // Unexpected error — try last known position before giving up
       try {
@@ -912,7 +1002,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _handleUnauthorized() {
-    _socket.resetForLogout();
     AuthService.logout().then((_) {
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(context,
@@ -945,19 +1034,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _fetchActiveServices() async {
     try {
       final headers = await AuthService.getHeaders();
-      // Only attach coordinates when we have a valid GPS fix — never send 0,0.
-      final hasValidFix = _locationReady && _pickupLat != 0.0 && _pickupLng != 0.0;
-      final Uri uri;
-      if (hasValidFix) {
-        uri = Uri.parse(ApiConfig.servicesForLocation).replace(queryParameters: {
-          'lat': _pickupLat.toString(),
-          'lng': _pickupLng.toString(),
-        });
-      } else {
-        uri = Uri.parse(ApiConfig.activeServices);
-      }
-      final r = await http.get(uri, headers: headers)
-          .timeout(const Duration(seconds: 10));
+      // Use location-based endpoint for city-filtered services
+      final uri =
+          Uri.parse(ApiConfig.servicesForLocation).replace(queryParameters: {
+        if (_locationReady) 'lat': _pickupLat.toString(),
+        if (_locationReady) 'lng': _pickupLng.toString(),
+      });
+      final r = await http.get(uri, headers: headers);
       if (r.statusCode == 200 && mounted) {
         final data = jsonDecode(r.body) as Map<String, dynamic>;
         final services = (data['services'] as List<dynamic>?)
@@ -966,11 +1049,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() => _activeServices = services);
       }
     } catch (_) {
-      // Network failure — try the non-location fallback
+      // Fallback to non-location endpoint
       try {
         final headers = await AuthService.getHeaders();
-        final r = await http.get(Uri.parse(ApiConfig.activeServices), headers: headers)
-            .timeout(const Duration(seconds: 10));
+        final r = await http.get(Uri.parse(ApiConfig.activeServices),
+            headers: headers);
         if (r.statusCode == 200 && mounted) {
           final data = jsonDecode(r.body) as Map<String, dynamic>;
           final services = (data['services'] as List<dynamic>?)
@@ -980,6 +1063,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       } catch (_) {}
     }
+  }
+
+  bool _isPlatformServiceActive(String key) {
+    return _activeServices.any((s) => s['key']?.toString() == key);
+  }
+
+  bool get _hasActiveRideService {
+    return _activeServices.any((s) {
+      final cat = s['category']?.toString() ?? '';
+      final key = s['key']?.toString() ?? '';
+      return cat == 'rides' || key.endsWith('_ride');
+    });
+  }
+
+  bool get _hasActiveParcelService {
+    return _activeServices.any((s) {
+      final cat = s['category']?.toString() ?? '';
+      final key = s['key']?.toString() ?? '';
+      return cat == 'parcel' || key == 'parcel_delivery';
+    });
+  }
+
+  String _activeVehicleSubtitle(List<Map<String, dynamic>> categories) {
+    final names = categories
+        .where((v) => v['isActive'] == true)
+        .map((v) => v['name']?.toString().trim() ?? '')
+        .where((name) => name.isNotEmpty)
+        .take(3)
+        .toList();
+    return names.isEmpty ? 'Available soon' : names.join(' · ');
   }
 
   /// Map a service key to its default emoji and color fallback.
@@ -1135,6 +1248,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         pickupLat: _pickupLat,
         pickupLng: _pickupLng,
         vehicleCategories: _vehicleCategories,
+        activeServices: _activeServices,
       ),
     );
   }
@@ -1167,24 +1281,125 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       key: _scaffoldKey,
       backgroundColor: Colors.white, // White base — no colored strip at bottom ever
       drawer: _buildDrawer(isDark),
-      body: SingleChildScrollView(
+      body: SafeArea(
+        child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const SizedBox(height: 24),
-                        // Greeting
-                        Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 8), // Reduced top margin from 12 to 4
+                  // Live header — logo, wallet, notifications
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                    child: Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => _scaffoldKey.currentState?.openDrawer(),
+                          child: JT.logoBlue(height: 32),
+                        ),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: () => Navigator.push(context,
+                              MaterialPageRoute(
+                                  builder: (_) => const WalletScreen())),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: JT.surfaceAlt,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.account_balance_wallet_rounded,
+                                    color: JT.primary, size: 13),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '₹${_walletBalance.toStringAsFixed(0)}',
+                                  style: GoogleFonts.poppins(
+                                    color: JT.primary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) =>
+                                          const NotificationsScreen()))
+                              .then((_) => _fetchUnreadCount()),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: JT.surfaceAlt,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: JT.border),
+                                ),
+                                child: const Icon(Icons.notifications_outlined,
+                                    color: JT.primary, size: 20),
+                              ),
+                              if (_unreadNotifCount > 0)
+                                Positioned(
+                                  top: -4,
+                                  right: -4,
+                                  child: Container(
+                                    constraints: const BoxConstraints(
+                                        minWidth: 17, minHeight: 17),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 4, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: JT.primaryDark,
+                                      borderRadius: BorderRadius.circular(10),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: JT.primaryDark
+                                              .withValues(alpha: 0.26),
+                                          blurRadius: 4,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        _unreadNotifCount > 9
+                                            ? '9+'
+                                            : _unreadNotifCount.toString(),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Greeting
+                  Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "Hello ${(_userName.isEmpty || _userName == 'there') ? 'there' : _userName.split(' ').first},",
+                        "Hello ${_userName == 'there' ? 'there' : _userName.split(' ').first},",
                         style: GoogleFonts.poppins(
                           fontSize: 22,
                           fontWeight: FontWeight.w500,
-                          color: const Color(0xFF1E293B),
+                          color: JT.textPrimary,
                         ),
                       ),
                       Text(
@@ -1192,14 +1407,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         style: GoogleFonts.poppins(
                           fontSize: 22,
                           fontWeight: FontWeight.w600,
-                          color: const Color(0xFF3B48D1), // Deep blue
+                          color: JT.primary,
                         ),
                       ),
                     ],
                   ),
                 ),
                 
-                const SizedBox(height: 12),
+                _buildBannerCarousel(isDark),
                 
                 // Destination Block
                 Padding(
@@ -1337,22 +1552,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 // New brand image on the left
                                 Positioned(
                                   bottom: -8, left: -8,
-                                  child: Image.network(
-                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775370325/04bcf87d-433e-4508-b475-78eaee34ff98_qxbn2c.png',
-                                    height: 85,
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                  ),
+                                  child: const VehicleArtwork(vehicleKey: 'bike', height: 85),
                                 ),
-                                // Large 3D Car Image centered at the bottom
                                 Positioned(
                                   bottom: 10, right: 10,
-                                  child: Image.network(
-                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775129355/ChatGPT_Image_Apr_2_2026_04_59_00_PM_rlsvjz.png',
-                                    height: 80,
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                  ),
+                                  child: const VehicleArtwork(vehicleKey: 'cab', height: 80),
                                 ),
                               ],
                             ),
@@ -1390,22 +1594,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 // Delivery image on the left side
                                 Positioned(
                                   bottom: -8, left: -8,
-                                  child: Image.network(
-                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775367404/be5b86c2-7a8a-4dbd-ad33-e8da2b627d5e_vurdrg.png',
-                                    height: 85,
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                  ),
+                                  child: const VehicleArtwork(vehicleKey: 'parcel_bike', height: 85),
                                 ),
-                                // Large 3D Gift/Box Image centered at the bottom
                                 Positioned(
                                   bottom: 10, right: 10,
-                                  child: Image.network(
-                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775128882/ChatGPT_Image_Apr_2_2026_04_47_08_PM_zg8llx.png',
-                                    height: 75,
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                  ),
+                                  child: const VehicleArtwork(vehicleKey: 'parcel_auto', height: 75),
                                 ),
                               ],
                             ),
@@ -1435,285 +1628,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   childAspectRatio: gridRatio, // Responsive ratio based on screen width
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
-                  children: [
-                      // Bike (Hero 3D Model style)
-                      GestureDetector(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PremiumLocationScreen(serviceType: 'ride', vehicleCategoryName: 'Bike', pickupAddress: _pickup.isNotEmpty ? _pickup : null, pickupLat: _pickupLat, pickupLng: _pickupLng))),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white, 
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
-                            ],
-                          ),
-                          child: Stack(
-                            clipBehavior: Clip.none, // Allow 3D image overflow
-                            children: [
-                              // Label on the left
-                              Positioned(
-                                left: 16,
-                                top: 0,
-                                bottom: 0,
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text("Bike", style: TextStyle(color: Color(0xFF1E293B), fontSize: 18 * textScale, fontWeight: FontWeight.bold)),
-                                  ),
-                              ),
-                              // Large 3D Bike Image on the right
-                              Positioned(
-                                right: -12, 
-                                top: -12,
-                                bottom: -12,
-                                child: Image.network(
-                                  'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775123974/bike_logo_g7idrq.png',
-                                  width: 105,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // Auto (Hero 3D Model style)
-                      GestureDetector(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PremiumLocationScreen(serviceType: 'ride', vehicleCategoryName: 'Auto', pickupAddress: _pickup.isNotEmpty ? _pickup : null, pickupLat: _pickupLat, pickupLng: _pickupLng))),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white, 
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
-                            ],
-                          ),
-                          child: Stack(
-                            clipBehavior: Clip.none, 
-                            children: [
-                              // Label on the left
-                              Positioned(
-                                left: 16,
-                                top: 0,
-                                bottom: 0,
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text("Auto", style: TextStyle(color: Color(0xFF1E293B), fontSize: 18 * textScale, fontWeight: FontWeight.bold)),
-                                  ),
-                              ),
-                              // Large 3D Auto (Rickshaw) Image on the right
-                              Positioned(
-                                right: -12, 
-                                top: -12,
-                                bottom: -12,
-                                child: Image.network(
-                                  'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775125550/ChatGPT_Image_Apr_2_2026_03_55_30_PM_ywb7fj.png',
-                                  width: 105,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // Cab (Hero 3D Model style)
-                      GestureDetector(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PremiumLocationScreen(serviceType: 'ride', vehicleCategoryName: 'Cab', pickupAddress: _pickup.isNotEmpty ? _pickup : null, pickupLat: _pickupLat, pickupLng: _pickupLng))),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white, 
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
-                            ],
-                          ),
-                          child: Stack(
-                            clipBehavior: Clip.none, 
-                            children: [
-                              // Label on the left
-                              Positioned(
-                                left: 16,
-                                top: 0,
-                                bottom: 0,
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text("Cab", style: TextStyle(color: Color(0xFF1E293B), fontSize: 18 * textScale, fontWeight: FontWeight.bold)),
-                                  ),
-                              ),
-                              // Large 3D Cab Image on the right
-                              Positioned(
-                                right: -12, 
-                                top: -12,
-                                bottom: -12,
-                                child: Image.network(
-                                  'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_27_28_AM_w0rcnh',
-                                  width: 105,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // Premium (Hero 3D Model style)
-                      GestureDetector(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PremiumLocationScreen(serviceType: 'ride', vehicleCategoryName: 'Premium', pickupAddress: _pickup.isNotEmpty ? _pickup : null, pickupLat: _pickupLat, pickupLng: _pickupLng))),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white, 
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
-                            ],
-                          ),
-                          child: Stack(
-                            clipBehavior: Clip.none, 
-                            children: [
-                              // Label on the left
-                              Positioned(
-                                left: 12, // Adjusted padding
-                                top: 0,
-                                bottom: 0,
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text("Premium", style: TextStyle(color: Color(0xFF1E293B), fontSize: 15 * textScale, fontWeight: FontWeight.bold)),
-                                  ),
-                              ),
-                              // Large 3D Premium Image on the right
-                              Positioned(
-                                right: -15, 
-                                top: -12,
-                                bottom: -12,
-                                child: Image.network(
-                                  'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_31_05_AM_kavp5e',
-                                  width: 100,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // Parcel (Hero 3D Model style)
-                      GestureDetector(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelBookingScreen(pickupAddress: _pickup, pickupLat: _pickupLat, pickupLng: _pickupLng))),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white, 
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
-                            ],
-                          ),
-                          child: Stack(
-                            clipBehavior: Clip.none, 
-                            children: [
-                              // Label on the left
-                              Positioned(
-                                left: 16,
-                                top: 0,
-                                bottom: 0,
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text("Parcel", style: TextStyle(color: Color(0xFF1E293B), fontSize: 18 * textScale, fontWeight: FontWeight.bold)),
-                                  ),
-                              ),
-                              // Large 3D Parcel Image on the right
-                              Positioned(
-                                right: -12, 
-                                top: -12,
-                                bottom: -12,
-                                child: Image.network(
-                                  'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775126915/ChatGPT_Image_Apr_2_2026_04_18_17_PM_g83nv8.png',
-                                  width: 105,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                        // Delivery (Hero 3D Model style)
-                        GestureDetector(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelBookingScreen(pickupAddress: _pickup, pickupLat: _pickupLat, pickupLng: _pickupLng))),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white, 
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
-                              ],
-                            ),
-                            child: Stack(
-                              clipBehavior: Clip.none, 
-                              children: [
-                                // Label on the left
-                                Positioned(
-                                  left: 12, top: 0, bottom: 0,
-                                  child: Center(
-                                    child: SizedBox(
-                                      width: (screenWidth / 2) - 50,
-                                      child: FittedBox(
-                                        alignment: Alignment.centerLeft,
-                                        fit: BoxFit.scaleDown,
-                                        child: Text("Delivery", style: TextStyle(color: Color(0xFF1E293B), fontSize: 15 * textScale, fontWeight: FontWeight.bold)),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                // Large 3D Delivery Image on the right
-                                Positioned(
-                                  right: -15, 
-                                  top: -12,
-                                  bottom: -12,
-                                  child: Image.network(
-                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775367404/be5b86c2-7a8a-4dbd-ad33-e8da2b627d5e_vurdrg.png',
-                                    width: 115,
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        // View All (Hero style)
-                        GestureDetector(
-                          onTap: () => _showAllServicesStaticSheet(),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white, 
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
-                              ],
-                            ),
-                            child: Stack(
-                              clipBehavior: Clip.none, 
-                              children: [
-                                Positioned(
-                                  left: 16, top: 0, bottom: 0,
-                                  child: Center(
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text("View All", style: TextStyle(color: Color(0xFF1E293B), fontSize: 18 * textScale, fontWeight: FontWeight.bold)),
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  right: 12, 
-                                  top: 0,
-                                  bottom: 0,
-                                  child: Icon(Icons.arrow_forward_rounded, color: Color(0xFF2C95F1), size: 32),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
+                  children: _buildHomeServiceGridChildren(textScale, screenWidth),
                     ),
                   // Removed Extra ) for Expanded
 
@@ -1723,6 +1638,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: _buildActiveTripBanner(false),
+                    ),
+                  ],
+                  if (_activeTrip == null && _activeParcel != null) ...[
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: _buildActiveParcelBanner(),
                     ),
                   ],
 
@@ -1759,6 +1681,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
+      ),
     );
   }
 
@@ -1793,61 +1716,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
         child:
             const Icon(Icons.my_location_rounded, color: JT.primary, size: 22),
-      ),
-    );
-  }
-
-  Widget _buildBottomCard(bool isDark) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(36)),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 18,
-              offset: const Offset(0, -4)),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Drag handle
-          Container(
-            margin: const EdgeInsets.only(top: 10, bottom: 4),
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: JT.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          // Content
-          if (_homeLoading)
-            _buildSkeletonLoader(isDark, JT.bgSoft)
-          else 
-            ModernBottomCard(
-              userName: _userName,
-              pickupAddress: _pickup,
-              pickupLat: _pickupLat,
-              pickupLng: _pickupLng,
-              onLocationTap: _getLocation,
-              onSearchRideTap: () {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => LocationScreen(
-                  serviceType: 'ride',
-                  pickupAddress: _pickup.isNotEmpty ? _pickup : null,
-                  pickupLat: _pickupLat, pickupLng: _pickupLng
-                )));
-              },
-              onSearchParcelTap: () {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelBookingScreen(
-                  pickupAddress: _pickup,
-                  pickupLat: _pickupLat, pickupLng: _pickupLng
-                )));
-              },
-            ),
-          // Bottom nav removed
-        ],
       ),
     );
   }
@@ -2234,6 +2102,243 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  bool _isHomeServiceVisible(String serviceKey) {
+    if (_activeServices.isEmpty) {
+      return serviceKey == 'bike_ride' || serviceKey == 'parcel_delivery';
+    }
+    return _activeServices.any((s) => s['key']?.toString() == serviceKey);
+  }
+
+  Color _accentForServiceKey(String serviceKey) {
+    final style = _vehicleStyle(_serviceLabelForKey(serviceKey));
+    return style['color'] as Color? ?? JT.primary;
+  }
+
+  String _serviceLabelForKey(String serviceKey) {
+    switch (serviceKey) {
+      case 'bike_ride':
+        return 'bike';
+      case 'auto_ride':
+        return 'auto';
+      case 'mini_car':
+        return 'cab';
+      case 'sedan':
+        return 'sedan';
+      case 'suv':
+        return 'suv';
+      case 'parcel_delivery':
+        return 'parcel';
+      case 'city_pool':
+        return 'pool';
+      case 'outstation_pool':
+        return 'outstation';
+      default:
+        return serviceKey;
+    }
+  }
+
+  Widget _homeServiceTile({
+    required String label,
+    required String vehicleKey,
+    required VoidCallback onTap,
+    double labelFontSize = 18,
+    double artworkWidth = 105,
+    double artworkRight = -12,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: JT.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: JT.cardShadow,
+        ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: 16,
+              top: 0,
+              bottom: 0,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  style: GoogleFonts.poppins(
+                    color: JT.textPrimary,
+                    fontSize: labelFontSize,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: artworkRight,
+              top: -12,
+              bottom: -12,
+              child: VehicleArtwork(vehicleKey: vehicleKey, width: artworkWidth),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _homeViewAllTile(double textScale) {
+    return GestureDetector(
+      onTap: _showAllServicesStaticSheet,
+      child: Container(
+        decoration: BoxDecoration(
+          color: JT.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: JT.cardShadow,
+        ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: 16,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'View All',
+                    style: GoogleFonts.poppins(
+                      color: JT.textPrimary,
+                      fontSize: 18 * textScale,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 12,
+              top: 0,
+              bottom: 0,
+              child: Icon(Icons.arrow_forward_rounded, color: JT.primary, size: 32),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildHomeServiceGridChildren(double textScale, double screenWidth) {
+    final tiles = <Widget>[];
+    void addTile(String serviceKey, Widget tile) {
+      if (_isHomeServiceVisible(serviceKey)) tiles.add(tile);
+    }
+
+    addTile(
+      'bike_ride',
+      _homeServiceTile(
+        label: 'Bike',
+        vehicleKey: 'bike',
+        labelFontSize: 18 * textScale,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PremiumLocationScreen(
+              serviceType: 'ride',
+              vehicleCategoryName: 'Bike',
+              pickupAddress: _pickup.isNotEmpty ? _pickup : null,
+              pickupLat: _pickupLat,
+              pickupLng: _pickupLng,
+            ),
+          ),
+        ),
+      ),
+    );
+    addTile(
+      'auto_ride',
+      _homeServiceTile(
+        label: 'Auto',
+        vehicleKey: 'auto',
+        labelFontSize: 18 * textScale,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PremiumLocationScreen(
+              serviceType: 'ride',
+              vehicleCategoryName: 'Auto',
+              pickupAddress: _pickup.isNotEmpty ? _pickup : null,
+              pickupLat: _pickupLat,
+              pickupLng: _pickupLng,
+            ),
+          ),
+        ),
+      ),
+    );
+    addTile(
+      'mini_car',
+      _homeServiceTile(
+        label: 'Cab',
+        vehicleKey: 'cab',
+        labelFontSize: 18 * textScale,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PremiumLocationScreen(
+              serviceType: 'ride',
+              vehicleCategoryName: 'Cab',
+              pickupAddress: _pickup.isNotEmpty ? _pickup : null,
+              pickupLat: _pickupLat,
+              pickupLng: _pickupLng,
+            ),
+          ),
+        ),
+      ),
+    );
+    addTile(
+      'sedan',
+      _homeServiceTile(
+        label: 'Premium',
+        vehicleKey: 'premium',
+        labelFontSize: 15 * textScale,
+        artworkWidth: 100,
+        artworkRight: -15,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PremiumLocationScreen(
+              serviceType: 'ride',
+              vehicleCategoryName: 'Premium',
+              pickupAddress: _pickup.isNotEmpty ? _pickup : null,
+              pickupLat: _pickupLat,
+              pickupLng: _pickupLng,
+            ),
+          ),
+        ),
+      ),
+    );
+    addTile(
+      'parcel_delivery',
+      _homeServiceTile(
+        label: 'Parcel',
+        vehicleKey: 'parcel_bike',
+        labelFontSize: 18 * textScale,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ParcelBookingScreen(
+              pickupAddress: _pickup,
+              pickupLat: _pickupLat,
+              pickupLng: _pickupLng,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (tiles.isNotEmpty) {
+      tiles.add(_homeViewAllTile(textScale));
+    }
+    return tiles;
+  }
+
   // ── FEATURED SERVICES — RIDE + PARCEL (admin-controlled) ────────────────
   // Only shows cards for services that have active vehicle categories in DB.
   Widget _buildFeaturedGrid(bool isDark) {
@@ -2287,8 +2392,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final rideCats = _vehicleCategories.where((v) => v['type']?.toString() == 'ride').toList();
     final parcelCats = _vehicleCategories.where((v) => v['type']?.toString() == 'parcel' || v['type']?.toString() == 'cargo').toList();
     
-    final isRideActive = rideCats.any((v) => v['isActive'] == true);
-    final isParcelActive = parcelCats.any((v) => v['isActive'] == true);
+    final isRideActive = _hasActiveRideService;
+    final isParcelActive = _hasActiveParcelService;
+    final rideSubtitle = _activeVehicleSubtitle(rideCats);
+    final parcelSubtitle = _activeVehicleSubtitle(parcelCats);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
@@ -2301,14 +2408,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         const SizedBox(height: 14),
         Row(children: [
           // ── Ride card — reflect admin toggle ──
-          if (rideCats.isNotEmpty)
+          if (rideCats.isNotEmpty && _hasActiveRideService)
             Expanded(
                 child: _buildServiceCard(
-              imageUrl: '${ApiConfig.baseUrl}/static/vehicles/auto.png',
-              fallbackIcon: Icons.electric_rickshaw_rounded,
+              vehicleKey: 'bike',
+              fallbackIcon: Icons.electric_bike_rounded,
               title: 'Ride',
-              subtitle: 'Bike · Auto · Car',
-              accent: const Color(0xFF2563EB),
+              subtitle: rideSubtitle,
+              accent: _accentForServiceKey('bike_ride'),
               isActive: isRideActive,
               onTap: () {
                 HapticFeedback.selectionClick();
@@ -2324,16 +2431,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             )));
               },
             )),
-          if (rideCats.isNotEmpty && parcelCats.isNotEmpty) const SizedBox(width: 14),
+          if (rideCats.isNotEmpty && _hasActiveRideService && parcelCats.isNotEmpty && _hasActiveParcelService) const SizedBox(width: 14),
           // ── Parcel card — reflect admin toggle ──
-          if (parcelCats.isNotEmpty)
+          if (parcelCats.isNotEmpty && _hasActiveParcelService)
             Expanded(
                 child: _buildServiceCard(
-              imageUrl: '${ApiConfig.baseUrl}/static/vehicles/parcel_bike.png',
+              vehicleKey: 'parcel_bike',
               fallbackIcon: Icons.local_shipping_rounded,
               title: 'Parcel',
-              subtitle: 'Bike · Truck · Van',
-              accent: const Color(0xFF059669),
+              subtitle: parcelSubtitle,
+              accent: _accentForServiceKey('parcel_delivery'),
               isActive: isParcelActive,
               onTap: () {
                 HapticFeedback.selectionClick();
@@ -2355,7 +2462,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildServiceCard({
-    required String imageUrl,
+    required String vehicleKey,
     required IconData fallbackIcon,
     required String title,
     required String subtitle,
@@ -2408,14 +2515,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: SizedBox(
                   width: 118,
                   height: 118,
-                  child: Image.network(
-                    imageUrl,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => Icon(
-                      fallbackIcon,
-                      size: 88,
-                      color: accent.withValues(alpha: 0.10),
-                    ),
+                  child: VehicleArtwork(
+                    vehicleKey: vehicleKey,
+                    width: 118,
+                    height: 118,
                   ),
                 ),
               ),
@@ -2497,13 +2600,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     pickupLng: _pickupLng,
                   )));
     } else if (serviceKey.contains('outstation_pool')) {
-      if (!_flag('outstation_pool_enabled')) return;
       Navigator.push(context,
           MaterialPageRoute(builder: (_) => const OutstationPoolScreen()));
     } else if (serviceKey.contains('city_pool') ||
         serviceKey.contains('carpool') ||
         serviceKey.contains('car_sharing')) {
-      if (!_flag('city_pool_enabled')) return;
       Navigator.push(context,
           MaterialPageRoute(builder: (_) => const CarSharingScreen()));
     } else if (serviceKey.contains('intercity_pool') ||
@@ -3098,8 +3199,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   fontSize: 11,
                   fontWeight: FontWeight.w500)),
         ])),
-        if (isSearching)
-          // Cancel button for stuck searching trips
+        if (isSearching) ...[
+          GestureDetector(
+            onTap: () {
+              if (tripId.isEmpty) return;
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => TrackingScreen(tripId: tripId)),
+              );
+            },
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: JT.primary.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text('Track →',
+                  style: GoogleFonts.poppins(
+                      color: JT.primary,
+                      fontWeight: FontWeight.w400,
+                      fontSize: 12)),
+            ),
+          ),
           GestureDetector(
             onTap: () async {
               final confirm = await showDialog<bool>(
@@ -3159,8 +3281,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       fontWeight: FontWeight.w400,
                       fontSize: 12)),
             ),
-          )
-        else
+          ),
+        ] else
           GestureDetector(
             onTap: () {
               if (tripId.isEmpty) return;
@@ -3182,6 +3304,98 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       fontSize: 12)),
             ),
           ),
+      ]),
+    );
+  }
+
+  Widget _buildActiveParcelBanner() {
+    final parcel = _activeParcel!;
+    final status = parcel['currentStatus']?.toString() ?? 'searching';
+    final orderId = parcel['id']?.toString() ?? '';
+    final driverName = parcel['driverName']?.toString() ?? 'delivery partner';
+    final dest = parcel['dropAddress']?.toString() ??
+        parcel['destinationAddress']?.toString() ??
+        'destination';
+    final isSearching = status == 'searching' || status == 'pending';
+    final bannerColor = isSearching ? JT.primaryDark : JT.primary;
+
+    final statusLabel = {
+          'searching': 'Finding delivery partner...',
+          'pending': 'Finding delivery partner...',
+          'driver_assigned': 'Partner assigned',
+          'accepted': 'Partner heading to pickup',
+          'picked_up': 'Parcel picked up',
+          'in_transit': 'Parcel on the way',
+        }[status] ??
+        'Parcel active';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(0, 0, 0, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: bannerColor.withValues(alpha: 0.20)),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 16,
+              offset: const Offset(0, 4))
+        ],
+      ),
+      child: Row(children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+              color: bannerColor.withValues(alpha: 0.10),
+              shape: BoxShape.circle),
+          child: Icon(
+              isSearching ? Icons.search_rounded : Icons.local_shipping_rounded,
+              color: bannerColor,
+              size: 22),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(statusLabel,
+              style: GoogleFonts.poppins(
+                  color: JT.textPrimary,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14)),
+          Text(
+              isSearching
+                  ? 'Looking for nearby partners...'
+                  : '$driverName → ${dest.length > 28 ? '${dest.substring(0, 26)}...' : dest}',
+              style: GoogleFonts.poppins(
+                  color: JT.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500)),
+        ])),
+        GestureDetector(
+          onTap: () {
+            if (orderId.isEmpty) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TrackingScreen(tripId: orderId, isParcel: true),
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: bannerColor.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text('Track →',
+                style: GoogleFonts.poppins(
+                    color: bannerColor,
+                    fontWeight: FontWeight.w400,
+                    fontSize: 12)),
+          ),
+        ),
       ]),
     );
   }
@@ -3249,7 +3463,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const ReferralScreen()));
           }),
-          if (_flag('city_pool_enabled'))
+          if (_isPlatformServiceActive('city_pool'))
             _drawerItem(
                 Icons.groups_rounded, 'City Pool', textColor, () {
               Navigator.pop(context);
@@ -3258,7 +3472,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   MaterialPageRoute(
                       builder: (_) => const CarSharingScreen()));
             }),
-          if (_flag('outstation_pool_enabled'))
+          if (_isPlatformServiceActive('outstation_pool') ||
+              _isPlatformServiceActive('intercity_pool'))
             _drawerItem(
                 Icons.route_rounded, 'Outstation Pool', textColor, () {
               Navigator.pop(context);
@@ -3267,12 +3482,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   MaterialPageRoute(
                       builder: (_) => const OutstationPoolScreen()));
             }),
-          _drawerItem(Icons.business_center_rounded, 'B2B Business', textColor,
-              () {
-            Navigator.pop(context);
-            Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const B2BLoginScreen()));
-          }),
           _drawerItem(Icons.support_agent_rounded, 'Support', textColor, () {
             Navigator.pop(context);
             Navigator.push(context,
@@ -3923,7 +4132,11 @@ class _AllServicesSheet extends StatelessWidget {
             'id': null,
             'name': svc['name']?.toString() ?? key,
             'type': inferServiceType(svc),
-            'emoji': svc['icon']?.toString() ?? '🚗',
+            'emoji': () {
+              final raw = svc['icon']?.toString() ?? '';
+              if (raw.isNotEmpty && raw != '??') return raw;
+              return _emojiForCategory(svc['name']?.toString() ?? key);
+            }(),
             'key': key,
           });
         }
@@ -4101,32 +4314,52 @@ class _StaticAllServicesSheet extends StatelessWidget {
   final double pickupLat;
   final double pickupLng;
   final List<Map<String, dynamic>> vehicleCategories;
+  final List<Map<String, dynamic>> activeServices;
 
   const _StaticAllServicesSheet({
     required this.pickup,
     required this.pickupLat,
     required this.pickupLng,
     required this.vehicleCategories,
+    required this.activeServices,
   });
+
+  List<Map<String, dynamic>> _visibleServices() {
+    const all = [
+      {'name': 'JAGO Bike', 'vehicleKey': 'bike', 'type': 'ride', 'cat': 'Bike', 'serviceKey': 'bike_ride'},
+      {'name': 'JAGO Auto', 'vehicleKey': 'auto', 'type': 'ride', 'cat': 'Auto', 'serviceKey': 'auto_ride'},
+      {'name': 'JAGO Mini', 'vehicleKey': 'cab', 'type': 'ride', 'cat': 'Mini', 'serviceKey': 'mini_car'},
+      {'name': 'JAGO Sedan', 'vehicleKey': 'sedan', 'type': 'ride', 'cat': 'Sedan', 'serviceKey': 'sedan'},
+      {'name': 'JAGO SUV', 'vehicleKey': 'suv', 'type': 'ride', 'cat': 'SUV', 'serviceKey': 'suv'},
+      {'name': 'JAGO Share', 'vehicleKey': 'carpool', 'type': 'ride', 'cat': 'Share', 'serviceKey': 'city_pool'},
+      {'name': 'JAGO Parcel', 'vehicleKey': 'parcel_bike', 'type': 'parcel', 'cat': 'Parcel', 'serviceKey': 'parcel_delivery'},
+      {'name': 'JAGO Outstation', 'vehicleKey': 'ride', 'type': 'ride', 'cat': 'Outstation', 'serviceKey': 'outstation_pool'},
+      {'name': 'JAGO Prime', 'vehicleKey': 'premium', 'type': 'ride', 'cat': 'Prime', 'serviceKey': 'sedan'},
+    ];
+    final activeKeys = activeServices
+        .map((s) => s['key']?.toString() ?? '')
+        .where((k) => k.isNotEmpty)
+        .toSet();
+    if (activeKeys.isEmpty) {
+      return all
+          .where((s) => s['serviceKey'] == 'bike_ride' || s['serviceKey'] == 'parcel_delivery')
+          .map((s) => Map<String, dynamic>.from(s))
+          .toList();
+    }
+    return all
+        .where((s) => activeKeys.contains(s['serviceKey']?.toString()))
+        .map((s) => Map<String, dynamic>.from(s))
+        .toList();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final services = [
-      {'name': 'JAGO Bike', 'icon': '🏍️', 'img': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780037646/ChatGPT_Image_May_29_2026_12_22_50_PM_rhxgf4.png', 'type': 'ride', 'cat': 'Bike'},
-      {'name': 'JAGO Auto', 'icon': '🛺', 'img': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780037799/ChatGPT_Image_May_29_2026_12_26_23_PM_gr1npy.png', 'type': 'ride', 'cat': 'Auto'},
-      {'name': 'JAGO Mini', 'icon': '🚗', 'img': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780037873/ChatGPT_Image_May_29_2026_12_27_19_PM_sbimsr.png', 'type': 'ride', 'cat': 'Mini'},
-      {'name': 'JAGO Sedan', 'icon': '🚙', 'img': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038163/ChatGPT_Image_May_29_2026_12_31_37_PM_ys5bjt.png', 'type': 'ride', 'cat': 'Sedan'},
-      {'name': 'JAGO SUV', 'icon': '🚙', 'img': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038163/ChatGPT_Image_May_29_2026_12_31_37_PM_ys5bjt.png', 'type': 'ride', 'cat': 'SUV'}, // fallback to sedan img
-      {'name': 'JAGO Share', 'icon': '🚐', 'img': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038580/ChatGPT_Image_May_29_2026_12_39_20_PM_s8j1bs.png', 'type': 'ride', 'cat': 'Share'},
-      {'name': 'JAGO Parcel', 'icon': '📦', 'img': null, 'type': 'parcel', 'cat': 'Parcel'},
-      {'name': 'JAGO Outstation', 'icon': '🛣️', 'img': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038697/ChatGPT_Image_May_29_2026_12_41_11_PM_xoynqv.png', 'type': 'ride', 'cat': 'Outstation'},
-      {'name': 'JAGO Prime', 'icon': '🚕', 'img': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038792/ChatGPT_Image_May_29_2026_12_42_56_PM_kjtvzj.png', 'type': 'ride', 'cat': 'Prime'},
-    ];
+    final services = _visibleServices();
 
     return Container(
       padding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 24),
       decoration: const BoxDecoration(
-        color: Colors.white,
+        color: JT.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: SingleChildScrollView(
@@ -4135,7 +4368,7 @@ class _StaticAllServicesSheet extends StatelessWidget {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: const Color(0xFFDCE9FF),
+              color: JT.primaryLight,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -4145,17 +4378,17 @@ class _StaticAllServicesSheet extends StatelessWidget {
                 style: GoogleFonts.poppins(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
-                    color: const Color(0xFF1E293B))),
+                    color: JT.textPrimary)),
             GestureDetector(
               onTap: () => Navigator.pop(context),
               child: Container(
                 width: 32,
                 height: 32,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF5F8FF),
+                decoration: BoxDecoration(
+                  color: JT.surfaceAlt,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.close, size: 18, color: Color(0xFF94A3B8)),
+                child: Icon(Icons.close, size: 18, color: JT.textTertiary),
               ),
             ),
           ]),
@@ -4200,29 +4433,23 @@ class _StaticAllServicesSheet extends StatelessWidget {
                 },
                 child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F8FF),
+                    color: JT.surfaceAlt,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFDCE9FF)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.03),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    border: Border.all(color: JT.border),
+                    boxShadow: JT.cardShadow,
                   ),
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    s['img'] != null
-                        ? Image.network(s['img'] as String, height: 48, fit: BoxFit.contain,
-                            errorBuilder: (_, __, ___) => Text(s['icon'] as String? ?? '🚗', style: const TextStyle(fontSize: 36)))
-                        : Text(s['icon'] as String, style: const TextStyle(fontSize: 36)),
+                    VehicleArtwork(
+                      vehicleKey: s['vehicleKey']?.toString() ?? 'bike',
+                      height: 48,
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       s['name'] as String,
                       style: GoogleFonts.poppins(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
-                          color: const Color(0xFF1E293B)),
+                          color: JT.textPrimary),
                       textAlign: TextAlign.center,
                       maxLines: 2,
                     ),

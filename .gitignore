@@ -5,8 +5,10 @@ release_exports_20260528/
 *.jks
 *.keystore
 **/android/key.properties
+**/android/local.properties
 **/android/app/google-services.json
 **/ios/Runner/GoogleService-Info.plist
+**/ios/Flutter/Secrets.xcconfig
 pilot-apks/
 .vscode/
 .claude/

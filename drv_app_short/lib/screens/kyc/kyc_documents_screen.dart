@@ -39,7 +39,7 @@ class _KycDocumentsScreenState extends State<KycDocumentsScreen> {
     setState(() => _loading = true);
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse(ApiConfig.driverDocuments), headers: headers);
+      final res = await http.get(Uri.parse(ApiConfig.driverDocuments), headers: headers).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200 &&
           (res.headers['content-type'] ?? '').contains('application/json')) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;

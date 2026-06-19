@@ -582,7 +582,7 @@ class _TripCompletionScreenState extends State<TripCompletionScreen> {
           'driverId': widget.trip['driverId']?.toString() ?? widget.trip['driver_id']?.toString(),
           'rating': stars,
         }),
-      );
+      ).timeout(const Duration(seconds: 10));
     } catch (e) {
       debugPrint('Rating failed: $e');
     }

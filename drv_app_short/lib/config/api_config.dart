@@ -2,8 +2,8 @@ class ApiConfig {
   // Override at compile time:  --dart-define=API_BASE_URL=https://yourdomain.com
   static const String compileTimeBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
 
-  // Final production backend/app host. Do not point mobile apps at staging.
-  static const String _prodUrl = 'https://sea-lion-app-h5luj.ondigitalocean.app';
+  // Production EC2 server (ap-south-1)
+  static const String _prodUrl = 'http://15.207.65.184:5000';
 
   static String get baseUrl {
     if (compileTimeBaseUrl.isNotEmpty) {
@@ -94,6 +94,7 @@ class ApiConfig {
 
   // ── Parcel Delivery ───────────────────────────────────────────────────
   static String get driverParcelPending => '$baseUrl/api/app/driver/parcel/pending';
+  static String get driverParcelActive => '$baseUrl/api/app/driver/parcel/active';
   static String driverParcelAccept(String id) => '$baseUrl/api/app/driver/parcel/$id/accept';
   static String driverParcelPickupOtp(String id) => '$baseUrl/api/app/driver/parcel/$id/pickup-otp';
   static String driverParcelDropOtp(String id) => '$baseUrl/api/app/driver/parcel/$id/drop-otp';
@@ -103,7 +104,11 @@ class ApiConfig {
   static String driverOutstationPoolRide(String id) => '$baseUrl/api/app/driver/outstation-pool/rides/$id';
   static String driverCompleteOutstationPoolRide(String id) => '$baseUrl/api/app/driver/outstation-pool/rides/$id/complete';
   static String driverOutstationPoolBookings(String rideId) =>
-      '$baseUrl/api/app/driver/outstation-pool/rides/$rideId/bookings';
+      '$baseUrl/api/app/driver/outstation-pool/rides/$rideId/passengers';
+  static String driverOutstationPoolStart(String rideId) =>
+      '$baseUrl/api/app/driver/outstation-pool/rides/$rideId/start';
+  static String driverOutstationPoolLocation(String rideId) =>
+      '$baseUrl/api/app/driver/outstation-pool/rides/$rideId/location';
 
   // Local Pool (City Car Sharing — driver side)
   static String get driverCarSharingRides => '$baseUrl/api/app/driver/car-sharing/rides';

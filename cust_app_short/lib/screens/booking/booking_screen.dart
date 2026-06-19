@@ -11,7 +11,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
+import '../../widgets/vehicle_artwork.dart';
 import '../../services/analytics_service.dart';
+import '../../services/api_retry.dart';
 import '../../services/auth_service.dart';
 import '../../services/vehicle_status_service.dart';
 import '../tracking/tracking_screen.dart';
@@ -56,6 +58,11 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   Timer? _debounce;
 
   late Razorpay _razorpay;
+
+  String? _pendingBookingIntentId;
+  String? _pendingRazorpayPaymentId;
+  String? _paidBookIdempotencyKey;
+  bool _paymentVerifiedPendingBook = false;
 
   bool _bookForSomeone = false;
   final _passengerNameCtrl = TextEditingController();
@@ -174,21 +181,21 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   static bool _shouldHideVehicle(String name) {
     final n = name.toLowerCase();
     
-    // Whitelist only requested categories: bike, auto, cab, premium
-    // Relaxed contains checks to avoid hiding valid variations (e.g. "Bike - Fast")
+    // Whitelist ride categories: bike, auto, cab, premium, sedan, suv, car
     if (n.contains('bike')) return false;
     if (n.contains('auto')) return false;
     if (n.contains('cab')) return false;
     if (n.contains('premium')) return false;
     if (n.contains('sedan')) return false;
+    if (n.contains('suv')) return false;
     if (n.contains('car')) return false;
 
-    // Hide everything else (Parcel, SUV, Pool, etc. if not requested)
+    // Hide parcel, pool, cargo, and other non-ride categories
     return true;
   }
 
   static Color _accentForVehicle(String name) {
-    return const Color(0xFF2C95F1); // Unified Premium Indigo
+    return const Color(0xFF2C95F1);
   }
 
   // ── Vehicle image URLs (real vehicle images, network with emoji fallback) ──
@@ -199,7 +206,6 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     'cab': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_27_28_AM_w0rcnh',
     'premium': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_31_05_AM_kavp5e',
     'parcel_bike': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_49_26_AM_gjbrxs',
-    'parcel_auto': '${ApiConfig.baseUrl}/static/vehicles/parcel_auto.png',
     'mini_truck':  'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_51_59_AM_jzd119',
     'pickup_van':  'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_54_02_AM_hicx7s',
   };
@@ -221,7 +227,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   /// Renders vehicle artwork — real network image with icon fallback.
   Widget _buildVehicleArtwork(String name, Color accent, bool isSelected, {double size = 96}) {
     final imageKey = _vehicleImageKey(name);
-    final imageUrl = imageKey != null ? _vehicleImageUrls[imageKey] : null;
+    final rawUrl = imageKey != null ? _vehicleImageUrls[imageKey] : null;
+    final imageUrl = (rawUrl != null && rawUrl.startsWith('http')) ? rawUrl : null;
     final icon = _iconForVehicle(name);
     final isParcel = widget.category == 'parcel';
 
@@ -237,19 +244,13 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         // Vehicle image (real) with icon fallback
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 18),
-          child: imageUrl != null
-            ? Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Icon(
-                  icon, size: size * 0.44,
-                  color: accent.withValues(alpha: isSelected ? 0.85 : 0.60),
-                ),
-              )
-            : Icon(
-                icon, size: size * 0.44,
-                color: accent.withValues(alpha: isSelected ? 0.85 : 0.60),
-              ),
+          child: VehicleArtwork(
+            vehicleKey: imageKey ?? name,
+            networkUrl: imageUrl,
+            height: size * 0.72,
+            width: size * 0.72,
+            tint: accent.withValues(alpha: isSelected ? 0.95 : 0.75),
+          ),
         ),
         // DELIVERY / RIDE badge at bottom
         Positioned(
@@ -277,9 +278,9 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     final name = fare['vehicleCategoryName']?.toString() ?? fare['name']?.toString() ?? 'Bike';
     final emoji = _emojiForVehicle(name);
     final accent = _accentForVehicle(name);
-    final fareVal = (fare['estimatedFare'] ?? 0).toDouble();
-    final rawMin = (fare['fareMin'] ?? (fareVal * 0.95)).toDouble();
-    final rawMax = (fare['fareMax'] ?? (fareVal * 1.05)).toDouble();
+    final fareVal = double.tryParse(fare['estimatedFare']?.toString() ?? '0') ?? 0.0;
+    final rawMin = double.tryParse(fare['fareMin']?.toString() ?? '') ?? (fareVal * 0.95);
+    final rawMax = double.tryParse(fare['fareMax']?.toString() ?? '') ?? (fareVal * 1.05);
     final displayMin = (rawMin - _promoDiscount).clamp(0.0, double.infinity);
     final displayMax = (rawMax - _promoDiscount).clamp(0.0, double.infinity);
     return AnimatedSwitcher(
@@ -421,7 +422,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   }
 
   double get _finalFare {
-    final f = (_fare?['estimatedFare'] ?? 0).toDouble();
+    final f = double.tryParse(_fare?['estimatedFare']?.toString() ?? '0') ?? 0.0;
     return (f - _promoDiscount).clamp(0, double.infinity);
   }
 
@@ -477,10 +478,10 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     try {
       final headers = await AuthService.getHeaders();
       final res = await http.get(Uri.parse(ApiConfig.wallet),
-        headers: headers);
+        headers: headers).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        if (mounted) setState(() => _walletBalance = (data['balance'] ?? 0).toDouble());
+        if (mounted) setState(() => _walletBalance = double.tryParse(data['balance']?.toString() ?? '0') ?? 0.0);
       }
     } catch (_) {}
   }
@@ -505,7 +506,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       final headers = await AuthService.getHeaders();
       final res = await http.post(Uri.parse(ApiConfig.applyCoupon),
         headers: headers,
-        body: jsonEncode({'code': code, 'fareAmount': (_fare?['estimatedFare'] ?? 0).toDouble()}));
+        body: jsonEncode({'code': code, 'fareAmount': double.tryParse(_fare?['estimatedFare']?.toString() ?? '0') ?? 0.0})).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         try {
           final data = jsonDecode(res.body);
@@ -543,7 +544,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       if (widget.category != null) body['category'] = widget.category;
       final res = await http.post(Uri.parse(ApiConfig.estimateFare),
         headers: headers,
-        body: jsonEncode(body));
+        body: jsonEncode(body)).timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final rawFares = data['fares'];
@@ -557,16 +558,20 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
               filtered = filtered.where((f) {
                 final vname = (f['vehicleCategoryName'] ?? f['name'] ?? '').toString().toLowerCase();
                 final vtype = (f['type'] ?? f['vehicleType'] ?? '').toString().toLowerCase();
-                return vtype == 'parcel' || vname.contains('parcel') ||
+                if (vtype == 'ride' || vtype == 'pool') return false;
+                if (vname.contains('premium') || vname.contains('sedan') || vname.contains('suv')) return false;
+                if ((vname.contains('cab') || vname.contains('car')) && !vname.contains('parcel') && !vname.contains('cargo') && !vname.contains('truck')) return false;
+                return vtype == 'parcel' || vname.contains('parcel') || vname.contains('cargo') ||
                     vname.contains('truck') || vname.contains('van') ||
-                    vname.contains('tata') || vname.contains('mini');
+                    vname.contains('tata') || vname.contains('tempo') || vname.contains('bolero');
               }).toList();
             } else {
               filtered = filtered.where((f) {
                 final vname = (f['vehicleCategoryName'] ?? f['name'] ?? '').toString().toLowerCase();
                 final vtype = (f['type'] ?? f['vehicleType'] ?? '').toString().toLowerCase();
-                // Exclude parcel/cargo vehicles from ride
+                // Exclude parcel/cargo/pool vehicles from ride booking
                 if (vtype == 'parcel' || vname.contains('parcel') || vname.contains('truck') || vname.contains('cargo')) return false;
+                if (vtype == 'pool' || vname.contains('pool') || vname.contains('carpool') || vname.contains('share')) return false;
                 // Rule 4: Hide inactive services
                 if (_shouldHideVehicle(vname)) return false;
                 return true;
@@ -721,10 +726,73 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     return null;
   }
 
-  Future<void> _confirmBooking({String? razorpayPaymentId}) async {
+  String _generateIdempotencyKey() {
+    final rng = Random.secure();
+    final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  void _clearPendingPaymentBooking() {
+    _pendingBookingIntentId = null;
+    _pendingRazorpayPaymentId = null;
+    _paidBookIdempotencyKey = null;
+    _paymentVerifiedPendingBook = false;
+  }
+
+  void _navigateToTrip(String tripId) {
+    if (tripId.isEmpty) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => TrackingScreen(tripId: tripId)),
+    );
+  }
+
+  Map<String, dynamic> _buildBookingDraft() {
+    final selectedFare = _fare;
+    final vcId = _vehicleCategoryId(selectedFare);
+    final vcName = selectedFare?['vehicleCategoryName']?.toString() ??
+        selectedFare?['name']?.toString() ??
+        widget.vehicleCategoryName ??
+        '';
+    final selectedFareAmount =
+        double.tryParse(selectedFare?['estimatedFare']?.toString() ?? '') ?? 0;
+    final estimatedFare =
+        (selectedFareAmount - _promoDiscount).clamp(0, double.infinity);
+    return {
+      'pickupAddress': widget.pickup,
+      'pickupLat': widget.pickupLat,
+      'pickupLng': widget.pickupLng,
+      'pickupShortName': _shortLocation(widget.pickup),
+      'destinationAddress': widget.destination,
+      'destinationLat': widget.destLat,
+      'destinationLng': widget.destLng,
+      'destinationShortName': _shortLocation(widget.destination),
+      if (vcId != null) 'vehicleCategoryId': vcId,
+      'vehicleType': vcName,
+      if (vcName.isNotEmpty) 'vehicleCategoryName': vcName,
+      'estimatedFare': estimatedFare,
+      'estimatedDistance': _distanceKm,
+      'paymentMethod': _paymentMethod,
+      'tripType': 'normal',
+    };
+  }
+
+  Future<void> _confirmBooking({
+    String? razorpayPaymentId,
+    String? bookingIntentId,
+  }) async {
+    if (_loading) return;
     setState(() => _loading = true);
+    final effectiveIntentId = bookingIntentId ?? _pendingBookingIntentId;
+    final effectivePaymentId = razorpayPaymentId ?? _pendingRazorpayPaymentId;
     try {
       final headers = await AuthService.getHeaders();
+      if (effectivePaymentId != null) {
+        _paidBookIdempotencyKey ??= _generateIdempotencyKey();
+        headers['Idempotency-Key'] = _paidBookIdempotencyKey!;
+      } else {
+        headers['Idempotency-Key'] = _generateIdempotencyKey();
+      }
       var selectedFare = _fare;
       var vcId = _vehicleCategoryId(selectedFare);
       if (vcId == null) {
@@ -756,7 +824,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         'paymentMethod': _paymentMethod,
         if (_promoDiscount > 0) 'promoDiscount': _promoDiscount,
         if (_appliedPromo != null) 'couponCode': _appliedPromo,
-        if (razorpayPaymentId != null) 'razorpayPaymentId': razorpayPaymentId,
+        if (effectivePaymentId != null) 'razorpayPaymentId': effectivePaymentId,
+        if (effectiveIntentId != null) 'bookingIntentId': effectiveIntentId,
         'ride_for': _bookForSomeone ? 'other' : 'self',
         if (_bookForSomeone) 'isForSomeoneElse': true,
         if (_bookForSomeone && _passengerNameCtrl.text.trim().isNotEmpty) ...{
@@ -782,17 +851,18 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         body['vehicleCategory'] = vcName;
         body['vehicleName'] = vcName;
       }
-      final res = await http.post(Uri.parse(ApiConfig.bookRide),
+      final res = await apiRetry(() => http.post(Uri.parse(ApiConfig.bookRide),
         headers: headers,
-        body: jsonEncode(body)).timeout(const Duration(seconds: 15));
+        body: jsonEncode(body)).timeout(const Duration(seconds: 15)));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final tripId = data['trip']?['id']?.toString() ?? '';
+        _clearPendingPaymentBooking();
         debugPrint(
             '[DISPATCH] Ride request created tripId=$tripId status=${data['trip']?['currentStatus'] ?? data['trip']?['status']} vehicleCategoryId=$vcId');
         AnalyticsService().logRideBooked(
           rideId: tripId,
-          fare: (_fare?['estimatedFare'] ?? 0).toDouble(),
+          fare: double.tryParse(_fare?['estimatedFare']?.toString() ?? '0') ?? 0.0,
           rideType: vcName ?? 'standard',
         );
         if (!mounted) return;
@@ -802,8 +872,39 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           Navigator.pop(context);
           return;
         }
-        Navigator.pushReplacement(context, MaterialPageRoute(
-          builder: (_) => TrackingScreen(tripId: tripId)));
+        _navigateToTrip(tripId);
+      } else if (res.statusCode == 409) {
+        debugPrint(
+            '[DISPATCH] Ride request conflict status=409 body=${res.body}');
+        if (!mounted) return;
+        try {
+          final err = jsonDecode(res.body);
+          final code = err['code']?.toString() ?? '';
+          final tripId = err['tripId']?.toString() ??
+              err['trip']?['id']?.toString() ??
+              '';
+          if (code == 'BOOKING_ALREADY_EXISTS' && tripId.isNotEmpty) {
+            _clearPendingPaymentBooking();
+            _navigateToTrip(tripId);
+            return;
+          }
+          if (code == 'BOOKING_FAILED_PAYMENT_RECEIVED' || err['recoverable'] == true) {
+            _pendingBookingIntentId =
+                err['bookingIntentId']?.toString() ?? effectiveIntentId;
+            _pendingRazorpayPaymentId =
+                err['razorpayPaymentId']?.toString() ?? effectivePaymentId;
+            _paymentVerifiedPendingBook = true;
+            _showSnack(
+              err['message']?.toString() ??
+                  'Payment received. Booking could not be completed. Please retry.',
+              error: true,
+            );
+            return;
+          }
+          _showSnack(err['message']?.toString() ?? 'Booking failed', error: true);
+        } catch (_) {
+          _showSnack('Booking failed. Please try again.', error: true);
+        }
       } else {
         debugPrint(
             '[DISPATCH] Ride request creation failed status=${res.statusCode} body=${res.body}');
@@ -818,7 +919,17 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     } catch (e) {
       debugPrint('[DISPATCH] Ride request creation threw: $e');
       if (!mounted) return;
-      _showSnack('Network error. Try again.', error: true);
+      if (effectivePaymentId != null && effectiveIntentId != null) {
+        _pendingBookingIntentId = effectiveIntentId;
+        _pendingRazorpayPaymentId = effectivePaymentId;
+        _paymentVerifiedPendingBook = true;
+        _showSnack(
+          'Payment received. Booking could not be completed. Please retry.',
+          error: true,
+        );
+      } else {
+        _showSnack('Network error. Try again.', error: true);
+      }
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -951,10 +1062,19 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   }
 
   Future<void> _handleOnConfirm() async {
+    if (_paymentVerifiedPendingBook && _pendingRazorpayPaymentId != null) {
+      await _confirmBooking(
+        razorpayPaymentId: _pendingRazorpayPaymentId,
+        bookingIntentId: _pendingBookingIntentId,
+      );
+      return;
+    }
     if (_paymentMethod == 'upi') {
       await _startRazorpayRidePayment();
     } else {
       if (_paymentMethod == 'wallet') {
+        // Refresh balance immediately before payment — avoids stale cached value
+        await _fetchWallet();
         final fare = _finalFare;
         if (_walletBalance < fare) {
           _showSnack('Insufficient wallet balance. Please recharge.', error: true);
@@ -966,13 +1086,36 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   }
 
   Future<void> _startRazorpayRidePayment() async {
+    if (_loading) return;
     setState(() => _loading = true);
+    _clearPendingPaymentBooking();
     try {
+      var selectedFare = _fare;
+      var vcId = _vehicleCategoryId(selectedFare);
+      if (vcId == null) {
+        final resolvedFare = await _resolveServerFare(selectedFare);
+        if (resolvedFare != null) {
+          selectedFare = resolvedFare;
+          vcId = _vehicleCategoryId(resolvedFare);
+          if (mounted && _allFares.isNotEmpty) {
+            setState(() => _allFares[_selectedFareIndex] = resolvedFare);
+          }
+        }
+      }
+      if (vcId == null) {
+        if (mounted) setState(() => _loading = false);
+        _showSnack('Could not refresh vehicle availability. Please try again.', error: true);
+        return;
+      }
       final headers = await AuthService.getHeaders();
       final fare = _finalFare;
       final res = await http.post(Uri.parse(ApiConfig.rideCreateOrder),
         headers: headers,
-        body: jsonEncode({'amount': fare})).timeout(const Duration(seconds: 15));
+        body: jsonEncode({
+          'amount': fare,
+          'paymentMethod': _paymentMethod,
+          'bookingDraft': _buildBookingDraft(),
+        })).timeout(const Duration(seconds: 15));
       if (res.statusCode != 200) {
         setState(() => _loading = false);
         try {
@@ -985,8 +1128,12 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       }
       final data = jsonDecode(res.body);
       final order = data['order'];
-      final keyId = data['keyId'];
-      if (order == null || keyId == null) {
+      final keyId = data['keyId']?.toString() ?? '';
+      final bookingIntentId = data['bookingIntentId']?.toString() ?? '';
+      if (bookingIntentId.isNotEmpty) {
+        _pendingBookingIntentId = bookingIntentId;
+      }
+      if (order == null || keyId.isEmpty || !keyId.startsWith('rzp_')) {
         setState(() => _loading = false);
         _showSnack('Payment setup failed. Try again.', error: true);
         return;
@@ -1012,26 +1159,68 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     }
   }
 
+  Future<Map<String, dynamic>?> _verifyRidePaymentWithRetry({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+    required int maxAttempts,
+  }) async {
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final headers = await AuthService.getHeaders();
+        final verifyRes = await http.post(
+          Uri.parse(ApiConfig.rideVerifyPayment),
+          headers: headers,
+          body: jsonEncode({
+            'razorpayOrderId': razorpayOrderId,
+            'razorpayPaymentId': razorpayPaymentId,
+            'razorpaySignature': razorpaySignature,
+            'amount': _finalFare,
+          }),
+        ).timeout(const Duration(seconds: 15));
+        final body = jsonDecode(verifyRes.body);
+        if (verifyRes.statusCode == 200 || verifyRes.statusCode == 409) {
+          return Map<String, dynamic>.from(body is Map ? body : {});
+        }
+        if (verifyRes.statusCode >= 400 && verifyRes.statusCode < 500) {
+          return null;
+        }
+      } catch (_) {}
+      if (attempt < maxAttempts) {
+        await Future.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+    return null;
+  }
+
   void _handleRazorpaySuccess(PaymentSuccessResponse response) async {
     if (!mounted) return;
     setState(() => _loading = true);
     try {
-      final headers = await AuthService.getHeaders();
-      final verifyRes = await http.post(Uri.parse(ApiConfig.rideVerifyPayment),
-        headers: headers,
-        body: jsonEncode({
-          'razorpayOrderId': response.orderId,
-          'razorpayPaymentId': response.paymentId,
-          'razorpaySignature': response.signature,
-          'amount': _finalFare,
-        })).timeout(const Duration(seconds: 15));
-      if (verifyRes.statusCode == 200) {
-        await _confirmBooking(razorpayPaymentId: response.paymentId);
-      } else {
+      final verified = await _verifyRidePaymentWithRetry(
+        razorpayOrderId: response.orderId ?? '',
+        razorpayPaymentId: response.paymentId ?? '',
+        razorpaySignature: response.signature ?? '',
+        maxAttempts: 3,
+      );
+      if (verified == null) {
         if (!mounted) return;
         setState(() => _loading = false);
         _showSnack('Payment verification failed. Contact support.', error: true);
+        return;
       }
+      final paymentId =
+          verified['paymentId']?.toString() ?? response.paymentId ?? '';
+      final intentId =
+          verified['bookingIntentId']?.toString() ?? _pendingBookingIntentId;
+      if (intentId != null && intentId.isNotEmpty) {
+        _pendingBookingIntentId = intentId;
+      }
+      _pendingRazorpayPaymentId = paymentId;
+      await _confirmBooking(
+        razorpayPaymentId: paymentId,
+        bookingIntentId: intentId,
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -1527,9 +1716,9 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     int fastestIdx = 0, saverIdx = 0, premiumIdx = 0;
     for (int j = 0; j < _allFares.length; j++) {
       final f = _allFares[j];
-      final fare = (f['estimatedFare'] ?? 0).toDouble();
-      final bestFare = (_allFares[saverIdx]['estimatedFare'] ?? 0).toDouble();
-      final highFare = (_allFares[premiumIdx]['estimatedFare'] ?? 0).toDouble();
+      final fare = double.tryParse(f['estimatedFare']?.toString() ?? '0') ?? 0.0;
+      final bestFare = double.tryParse(_allFares[saverIdx]['estimatedFare']?.toString() ?? '0') ?? 0.0;
+      final highFare = double.tryParse(_allFares[premiumIdx]['estimatedFare']?.toString() ?? '0') ?? 0.0;
       if (fare < bestFare) saverIdx = j;
       if (fare > highFare) premiumIdx = j;
       final timeStr = f['estimatedTime']?.toString() ?? '99 min';
@@ -1669,7 +1858,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         final isActive = f['isActive'] != false;
         final isSelected = i == _selectedFareIndex && isActive;
         final name = f['vehicleCategoryName']?.toString() ?? f['vehicleName']?.toString() ?? f['name']?.toString() ?? 'Bike';
-        final fareVal = (f['estimatedFare'] ?? 0).toDouble();
+        final fareVal = double.tryParse(f['estimatedFare']?.toString() ?? '0') ?? 0.0;
         final time = f['estimatedTime']?.toString() ?? '~5 min';
         final displayFare = isSelected ? (fareVal - _promoDiscount).clamp(0.0, double.infinity) : fareVal;
         
@@ -1810,15 +1999,15 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     const textMain = JT.textPrimary;
     final textSub = Colors.grey.shade600;
 
-    final baseFare = (fare['baseFare'] ?? 0).toDouble();
-    final distanceFare = (fare['distanceFare'] ?? 0).toDouble();
-    final timeFare = (fare['timeFare'] ?? 0).toDouble();
-    final helperCharge = (fare['helperCharge'] ?? 0).toDouble();
-    final gst = (fare['gst'] ?? 0).toDouble();
-    final minFare = (fare['minimumFare'] ?? 0).toDouble();
-    final farePerKm = (fare['farePerKm'] ?? 0).toDouble();
-    final waitingChargePerMin = (fare['waitingChargePerMin'] ?? 0).toDouble();
-    final subtotal = (fare['subtotal'] ?? (baseFare + distanceFare + timeFare)).toDouble();
+    final baseFare = double.tryParse(fare['baseFare']?.toString() ?? '0') ?? 0.0;
+    final distanceFare = double.tryParse(fare['distanceFare']?.toString() ?? '0') ?? 0.0;
+    final timeFare = double.tryParse(fare['timeFare']?.toString() ?? '0') ?? 0.0;
+    final helperCharge = double.tryParse(fare['helperCharge']?.toString() ?? '0') ?? 0.0;
+    final gst = double.tryParse(fare['gst']?.toString() ?? '0') ?? 0.0;
+    final minFare = double.tryParse(fare['minimumFare']?.toString() ?? '0') ?? 0.0;
+    final farePerKm = double.tryParse(fare['farePerKm']?.toString() ?? '0') ?? 0.0;
+    final waitingChargePerMin = double.tryParse(fare['waitingChargePerMin']?.toString() ?? '0') ?? 0.0;
+    final subtotal = double.tryParse(fare['subtotal']?.toString() ?? '') ?? (baseFare + distanceFare + timeFare);
     final isMinFareApplied = minFare > 0 && subtotal <= minFare + 0.01;
     final isNight = fare['isNightCharge'] == true;
 

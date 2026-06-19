@@ -37,7 +37,7 @@ class _DriverSupportChatScreenState extends State<DriverSupportChatScreen> {
   Future<void> _load() async {
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse(ApiConfig.supportChat), headers: headers);
+      final res = await http.get(Uri.parse(ApiConfig.supportChat), headers: headers).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) setState(() {
@@ -69,7 +69,7 @@ class _DriverSupportChatScreenState extends State<DriverSupportChatScreen> {
         Uri.parse(ApiConfig.supportChatSend),
         headers: headers,
         body: jsonEncode({'message': text}),
-      );
+      ).timeout(const Duration(seconds: 10));
     } catch (_) {}
     if (mounted) setState(() => _sending = false);
     await _load();

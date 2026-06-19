@@ -56,7 +56,7 @@ class _EarningsScreenState extends State<EarningsScreen>
         Uri.parse(
             '${ApiConfig.baseUrl}/api/app/driver/earnings?period=$_period'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200 && mounted) {
         setState(() => _stats = jsonDecode(res.body));
         _fadeCtrl.forward(from: 0);
@@ -72,12 +72,12 @@ class _EarningsScreenState extends State<EarningsScreen>
       final res = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/app/driver/weekly-earnings'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200 && mounted) {
         final d = jsonDecode(res.body);
         setState(() {
           _weekDays = List<Map<String, dynamic>>.from(d['days'] ?? []);
-          _weekTotal = (d['total'] ?? 0).toDouble();
+          _weekTotal = double.tryParse(d['total']?.toString() ?? '0') ?? 0.0;
         });
       }
     } catch (_) {}
@@ -86,9 +86,9 @@ class _EarningsScreenState extends State<EarningsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final gross = (_stats['grossFare'] ?? 0).toDouble();
-    final commission = (_stats['commission'] ?? 0).toDouble();
-    final net = (_stats['netEarnings'] ?? 0).toDouble();
+    final gross = double.tryParse(_stats['grossFare']?.toString() ?? '0') ?? 0.0;
+    final commission = double.tryParse(_stats['commission']?.toString() ?? '0') ?? 0.0;
+    final net = double.tryParse(_stats['netEarnings']?.toString() ?? '0') ?? 0.0;
     final completed = _stats['completedTrips'] ?? 0;
     final cancelled = _stats['cancelledTrips'] ?? 0;
     final maxWeek = _weekDays.isEmpty

@@ -152,7 +152,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
       final res = await http.get(
         Uri.parse('${ApiConfig.reverseGeocode}?lat=$lat&lng=$lng'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 6));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         return data['formattedAddress']?.toString() ??

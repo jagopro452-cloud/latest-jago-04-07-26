@@ -13,6 +13,7 @@ dependencies:
   cupertino_icons: ^1.0.6
   http: ^1.2.0
   shared_preferences: ^2.2.2
+  flutter_secure_storage: ^9.2.4
   geolocator: ^13.0.0
   google_maps_flutter: ^2.6.0
   permission_handler: ^11.3.0
@@ -49,3 +50,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/vehicles/

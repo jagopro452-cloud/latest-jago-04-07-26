@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -59,7 +60,7 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
       final res = await http.get(
         Uri.parse(ApiConfig.driverOutstationPoolRides),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final rows = (data['data'] as List? ?? [])
@@ -126,7 +127,7 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
           'farePerSeat': _fareCtrl.text.trim(),
           'note': _noteCtrl.text.trim(),
         }),
-      );
+      ).timeout(const Duration(seconds: 15));
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       if (!mounted) return;
       if (res.statusCode == 200) {
@@ -179,7 +180,7 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
       Navigator.pop(context);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
-        final passengers = (data['bookings'] ?? data['data'] ?? []) as List;
+        final passengers = (data['passengers'] ?? data['bookings'] ?? data['data'] ?? []) as List;
         _showManifestDialog(passengers.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList());
       } else {
         _snack('Could not load passengers.', error: true);
@@ -258,6 +259,41 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
     );
   }
 
+  Future<void> _startRide(Map<String, dynamic> ride) async {
+    final id = ride['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    double? lat;
+    double? lng;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      lat = pos.latitude;
+      lng = pos.longitude;
+    } catch (_) {}
+    try {
+      final headers = await AuthService.getHeaders();
+      final res = await http.post(
+        Uri.parse(ApiConfig.driverOutstationPoolStart(id)),
+        headers: {...headers, 'Content-Type': 'application/json'},
+        body: jsonEncode({
+          if (lat != null) 'lat': lat,
+          if (lng != null) 'lng': lng,
+        }),
+      ).timeout(const Duration(seconds: 10));
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        _snack('Trip started! Passengers notified.');
+        await _loadRides();
+      } else {
+        _snack(data['message']?.toString() ?? 'Could not start ride', error: true);
+      }
+    } catch (_) {
+      _snack('Network error while starting ride', error: true);
+    }
+  }
+
   Future<void> _completeRide(Map<String, dynamic> ride) async {
     final id = ride['id']?.toString() ?? '';
     if (id.isEmpty) return;
@@ -266,7 +302,7 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
       final res = await http.post(
         Uri.parse(ApiConfig.driverCompleteOutstationPoolRide(id)),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       if (!mounted) return;
       if (res.statusCode == 200) {
@@ -289,7 +325,7 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
         Uri.parse(ApiConfig.driverOutstationPoolRide(id)),
         headers: {...headers, 'Content-Type': 'application/json'},
         body: jsonEncode(body),
-      );
+      ).timeout(const Duration(seconds: 10));
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       if (!mounted) return;
       if (res.statusCode == 200) {
@@ -546,6 +582,23 @@ class _OutstationPoolDriverScreenState extends State<OutstationPoolDriverScreen>
             ],
           ),
           const SizedBox(height: 8),
+          if (status == 'scheduled' || status == 'active')
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: status == 'active' ? null : () => _startRide(ride),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: Text(status == 'active' ? 'Trip in progress' : 'Start Trip'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: JT.primary,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: JT.primary.withValues(alpha: 0.35),
+                  ),
+                ),
+              ),
+            ),
           Row(
             children: [
               Expanded(

@@ -79,6 +79,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
     )..repeat(reverse: true);
 
     _socket.connect(ApiConfig.socketUrl);
+    _socket.setActiveTrip(_orderId);
     _startLocationUpdates();
 
     // Auto-navigate to pickup on open
@@ -90,7 +91,8 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
     _otpCtrl.dispose();
     _pulseCtrl.dispose();
     _locationTimer?.cancel();
-    _socket.disconnect();
+    // Keep the app-wide socket alive for new ride offers after parcel completion.
+    _socket.setActiveTrip(null);
     super.dispose();
   }
 
@@ -104,6 +106,17 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
         );
         if (_socket.isConnected) {
           _socket.sendLocation(lat: pos.latitude, lng: pos.longitude);
+          if (_orderId.isNotEmpty &&
+              (_stage == _ParcelStage.navigatingToPickup ||
+                  _stage == _ParcelStage.navigatingToDrop ||
+                  _stage == _ParcelStage.atPickup ||
+                  _stage == _ParcelStage.atDrop)) {
+            _socket.sendParcelLocation(
+              orderId: _orderId,
+              lat: pos.latitude,
+              lng: pos.longitude,
+            );
+          }
         }
       } catch (_) {}
     });
@@ -145,7 +158,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
         Uri.parse(ApiConfig.driverParcelPickupOtp(_orderId)),
         headers: hdrs,
         body: jsonEncode({'otp': otp}),
-      );
+      ).timeout(const Duration(seconds: 10));
       if (r.statusCode == 200) {
         HapticFeedback.heavyImpact();
         _otpCtrl.clear();
@@ -178,7 +191,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
         Uri.parse(ApiConfig.driverParcelDropOtp(_orderId)),
         headers: hdrs,
         body: jsonEncode({'dropIndex': _dropIdx, 'otp': otp}),
-      );
+      ).timeout(const Duration(seconds: 10));
       if (r.statusCode == 200) {
         final data = jsonDecode(r.body);
         HapticFeedback.heavyImpact();
@@ -221,6 +234,8 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
   }
 
   void _goHome() {
+    _locationTimer?.cancel();
+    _socket.setActiveTrip(null);
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const HomeScreen()),

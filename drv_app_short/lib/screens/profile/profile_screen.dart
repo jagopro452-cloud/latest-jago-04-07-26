@@ -84,7 +84,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<String> _getSupportPhone() async {
     try {
-      final r = await http.get(Uri.parse(ApiConfig.configs));
+      final r = await http.get(Uri.parse(ApiConfig.configs)).timeout(const Duration(seconds: 6));
       if (r.statusCode == 200) {
         final data = jsonDecode(r.body);
         return data['configs']?['support_phone'] ?? '+916303000000';
@@ -161,7 +161,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Uri.parse(ApiConfig.updateProfile),
                       headers: {...headers, 'Content-Type': 'application/json'},
                       body: jsonEncode({'fullName': newName}),
-                    );
+                    ).timeout(const Duration(seconds: 10));
                     if (res.statusCode == 200 && mounted) {
                       setState(() { _name = newName; });
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -197,7 +197,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Uri.parse(ApiConfig.deleteAccount),
         headers: {...headers, 'Content-Type': 'application/json'},
         body: jsonEncode({'permanent': permanent}),
-      );
+      ).timeout(const Duration(seconds: 15));
       if (res.statusCode == 200 && mounted) {
         await AuthService.logout();
         Navigator.pushAndRemoveUntil(context,

@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
+import 'secure_token_store.dart';
 
 const String _tripAlertChannelId = 'trip_alerts';
 const String _tripAlertChannelName = 'Trip Alerts';
@@ -199,6 +200,7 @@ class FcmService {
   final _foregroundAlertController =
       StreamController<Map<String, dynamic>>.broadcast();
   bool _initialized = false;
+  int _notifCounter = 1000;
 
   Stream<Map<String, dynamic>> get onForegroundAlert =>
       _foregroundAlertController.stream;
@@ -368,7 +370,7 @@ class FcmService {
     Map<String, dynamic>? data,
   }) {
     _localNotif.show(
-      title.hashCode.abs() % 1000 + 100,
+      _notifCounter++,
       title,
       body,
       NotificationDetails(
@@ -429,9 +431,8 @@ class FcmService {
 
   Future<void> _saveTokenToServer(String token) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final authToken = prefs.getString('auth_token');
-      if (authToken == null) return;
+      final authToken = await SecureTokenStore.read();
+      if (authToken == null || authToken.isEmpty) return;
       final res = await http.post(
         Uri.parse(ApiConfig.fcmToken),
         headers: {

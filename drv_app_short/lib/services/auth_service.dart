@@ -7,14 +7,16 @@ import '../config/api_config.dart';
 import '../main.dart' show navigatorKey;
 import '../models/user_model.dart';
 import '../screens/splash_screen.dart';
+import 'analytics_service.dart';
 import 'fcm_service.dart';
+import 'secure_token_store.dart';
 
 class AuthService {
-  static const _tokenKey = 'auth_token';
   static const _userKey = 'user_data';
   static const _userNameKey = 'user_name';
   static const _userPhoneKey = 'user_phone';
   static const _userIdKey = 'user_id';
+  static bool _is401InProgress = false;
 
   static const Map<String, String> _base = {
     'Content-Type': 'application/json',
@@ -22,14 +24,13 @@ class AuthService {
     'Accept': 'application/json',
   };
 
+  /// Returns the JWT token from secure storage (never SharedPreferences).
   static Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_tokenKey);
+    return SecureTokenStore.read();
   }
 
   static Future<void> saveToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, token.trim());
+    await SecureTokenStore.write(token);
   }
 
   static Future<void> saveUser(Map<String, dynamic> userData) async {
@@ -68,17 +69,20 @@ class AuthService {
   }
 
   static Future<void> clearLocalSession() async {
+    // Delete JWT from secure storage
+    await SecureTokenStore.delete();
+    // Clear non-sensitive profile data from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_tokenKey);
     await prefs.remove(_userKey);
     await prefs.remove(_userNameKey);
     await prefs.remove(_userPhoneKey);
     await prefs.remove(_userIdKey);
+    // Also clear any legacy token that may still exist
+    await prefs.remove('auth_token');
   }
 
   static Future<bool> rehydrateStoredSession({bool refreshProfile = true}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(_tokenKey)?.trim() ?? '';
+    final token = (await SecureTokenStore.read())?.trim() ?? '';
     if (token.isEmpty) return false;
 
     final savedUser = await getSavedUser();
@@ -117,10 +121,14 @@ class AuthService {
   static Future<void> _saveSession(Map<String, dynamic> data) async {
     final token = data['token']?.toString();
     if (token == null || token.isEmpty) return;
-    await saveToken(token);
+    // Store JWT in Keystore/Keychain — not SharedPreferences
+    await SecureTokenStore.write(token);
     final user = (data['user'] is Map<String, dynamic>) ? data['user'] as Map<String, dynamic> : data;
     await saveUser(user);
     FcmService().onLoginSuccess().catchError((_) {});
+    final userId = user['id']?.toString() ?? user['userId']?.toString() ?? user['user_id']?.toString() ?? '';
+    AnalyticsService().setUserId(userId.isNotEmpty ? userId : null).catchError((_) {});
+    AnalyticsService().logLogin().catchError((_) {});
   }
 
   static Future<Map<String, dynamic>> loginWithPassword(String phone, String password) async {
@@ -200,11 +208,14 @@ class AuthService {
   }
 
   static Future<void> handle401() async {
+    if (_is401InProgress) return;
+    _is401InProgress = true;
     await clearLocalSession();
     navigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const SplashScreen()),
       (route) => false,
     );
+    _is401InProgress = false;
   }
 
   static Future<UserModel?> getProfile() async {

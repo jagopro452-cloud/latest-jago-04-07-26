@@ -81,9 +81,8 @@ class _LocationScreenState extends State<LocationScreen>
 
   // ── Theme ─────────────────────────────────────────────────────────────────
   bool get _isParcel => widget.serviceType == 'parcel';
-  Color get _accent => _isParcel ? const Color(0xFFEA580C) : JT.primary;
-  Color get _accentLight =>
-      _isParcel ? const Color(0xFFFFF7ED) : const Color(0xFFF0F7FF);
+  Color get _accent => JT.primary;
+  Color get _accentLight => JT.primaryLight;
 
   @override
   void initState() {
@@ -274,7 +273,7 @@ class _LocationScreenState extends State<LocationScreen>
     try {
       final r = await http.get(
           Uri.parse(
-              '${ApiConfig.baseUrl}/api/app/popular-locations?city=Vijayawada'));
+              '${ApiConfig.baseUrl}/api/app/popular-locations?city=Vijayawada')).timeout(const Duration(seconds: 6));
       if (r.statusCode == 200) {
         final data = jsonDecode(r.body) as Map<String, dynamic>;
         final list = ((data['locations'] as List<dynamic>?) ?? [])

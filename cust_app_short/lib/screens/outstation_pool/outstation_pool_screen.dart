@@ -424,7 +424,15 @@ class _RideCard extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _BookBottomSheet(ride: ride, farePerSeat: farePerSeat, maxSeats: maxSeats),
+      builder: (_) => _BookBottomSheet(
+        ride: ride,
+        farePerSeat: farePerSeat,
+        maxSeats: maxSeats,
+        onBooked: () {
+          _tabs.animateTo(1);
+          _loadMyBookings();
+        },
+      ),
     );
   }
 }
@@ -435,7 +443,13 @@ class _BookBottomSheet extends StatefulWidget {
   final Map<String, dynamic> ride;
   final double farePerSeat;
   final int maxSeats;
-  const _BookBottomSheet({required this.ride, required this.farePerSeat, required this.maxSeats});
+  final VoidCallback? onBooked;
+  const _BookBottomSheet({
+    required this.ride,
+    required this.farePerSeat,
+    required this.maxSeats,
+    this.onBooked,
+  });
   @override
   State<_BookBottomSheet> createState() => _BookBottomSheetState();
 }
@@ -499,6 +513,7 @@ class _BookBottomSheetState extends State<_BookBottomSheet> {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       if (res.statusCode == 200 && body['success'] == true) {
         Navigator.of(context).pop();
+        widget.onBooked?.call();
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Booking confirmed!'),
           backgroundColor: Colors.green,

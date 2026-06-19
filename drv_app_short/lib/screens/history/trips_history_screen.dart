@@ -66,7 +66,7 @@ class _TripsHistoryScreenState extends State<TripsHistoryScreen>
       final res = await http.get(
         Uri.parse('${ApiConfig.driverTrips}?limit=100'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         final trips = (data['trips'] as List?) ?? [];
@@ -280,7 +280,7 @@ class _TripsHistoryScreenState extends State<TripsHistoryScreen>
     final headers = await AuthService.getHeaders();
     try {
       final res = await http.get(Uri.parse(ApiConfig.tripReceipt(tripId)),
-        headers: headers);
+        headers: headers).timeout(const Duration(seconds: 10));
       if (!mounted) return;
       if (res.statusCode == 200) {
         final receipt = jsonDecode(res.body)['receipt'] as Map<String, dynamic>;

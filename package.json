@@ -1,10 +1,15 @@
 {
   "name": "jago-updates-23-04-jago",
   "version": "1.0.0",
-  "description": "",
+  "private": true,
+  "description": "Local wrapper for the canonical Jago web app source.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "powershell -ExecutionPolicy Bypass -Command \"Set-Location 'C:\\Users\\kiran\\Downloads\\jago-Updates-23-04-jago\\jago-Updates-23-04-jago\\jago_app-main\\app'; $env:NODE_ENV='development'; $env:LOCAL_STATIC_FRONTEND='1'; & .\\node_modules\\.bin\\tsx.cmd server/index.ts\"",
+    "start": "powershell -ExecutionPolicy Bypass -Command \"Set-Location 'C:\\Users\\kiran\\Downloads\\jago-Updates-23-04-jago\\jago-Updates-23-04-jago\\jago_app-main\\app'; & npm.cmd start\"",
+    "build": "powershell -ExecutionPolicy Bypass -Command \"Set-Location 'C:\\Users\\kiran\\Downloads\\jago-Updates-23-04-jago\\jago-Updates-23-04-jago\\jago_app-main\\app'; & npm.cmd run build\"",
+    "check": "powershell -ExecutionPolicy Bypass -Command \"Set-Location 'C:\\Users\\kiran\\Downloads\\jago-Updates-23-04-jago\\jago-Updates-23-04-jago\\jago_app-main\\app'; & npm.cmd run check\"",
+    "test": "powershell -ExecutionPolicy Bypass -Command \"Set-Location 'C:\\Users\\kiran\\Downloads\\jago-Updates-23-04-jago\\jago-Updates-23-04-jago\\jago_app-main\\app'; & npm.cmd test\""
   },
   "keywords": [],
   "author": "",
@@ -12,5 +17,8 @@
   "type": "commonjs",
   "devDependencies": {
     "@playwright/test": "^1.60.0"
+  },
+  "dependencies": {
+    "sharp": "^0.35.1"
   }
 }

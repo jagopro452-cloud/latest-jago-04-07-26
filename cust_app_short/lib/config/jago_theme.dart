@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class JT {
@@ -18,12 +19,12 @@ class JT {
   // ── PREMIUM DESIGN SYSTEM (v3 Senior-Level) ────────────────────────────
 
   // ──────────────────────────────────────────────────────────────────────────
-  // PRIMARY PALETTE — Professional Blue
+  // PRIMARY PALETTE — Professional Blue (original JAGO app)
   // ──────────────────────────────────────────────────────────────────────────
-  static const Color primary = Color(0xFF2D8CFF); // Primary blue
-  static const Color primaryLight = Color(0xFFE8F2FF); // Light variant
-  static const Color primaryDark = Color(0xFF1A6FDB); // Dark variant
-  static const Color secondary = Color(0xFF5B9DFF); // Supporting blue
+  static const Color primary = Color(0xFF2D8CFF);
+  static const Color primaryLight = Color(0xFFE8F2FF);
+  static const Color primaryDark = Color(0xFF1A6FDB);
+  static const Color secondary = Color(0xFF5B9DFF);
 
   // ──────────────────────────────────────────────────────────────────────────
   // BACKGROUNDS & SURFACES
@@ -31,7 +32,7 @@ class JT {
   static const Color bg = Color(0xFFFFFFFF); // Main background
   static const Color bgSoft = Color(0xFFF9FAFB); // Soft background
   static const Color surface = Color(0xFFFFFFFF); // Surface
-  static const Color surfaceAlt = Color(0xFFF3F6FF); // Alt surface
+  static const Color surfaceAlt = Color(0xFFF3F6FF);
   static const Color card = Color(0xFFFBFCFE); // Premium card bg
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -342,8 +343,7 @@ class JT {
       ColorFiltered(
         colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
         child: Image.asset('assets/images/jago_logo_new.png',
-            height: height,
-            fit: BoxFit.contain),
+            height: height, fit: BoxFit.contain),
       );
 
   // ── MODERN SPACING SYSTEM ──

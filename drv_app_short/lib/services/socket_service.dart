@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
+import 'secure_token_store.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
@@ -126,7 +127,7 @@ class SocketService {
 
     final prefs = await SharedPreferences.getInstance();
     var userId = prefs.getString('user_id') ?? '';
-    final token = prefs.getString('auth_token') ?? '';
+    final token = (await SecureTokenStore.read()) ?? '';
 
     // Recovery: existing installs before the user_id fix may have empty user_id.
     // Attempt to extract it from the saved user JSON so they don't need to reinstall.
@@ -365,6 +366,22 @@ class SocketService {
     );
   }
 
+  void sendParcelLocation({
+    required String orderId,
+    required double lat,
+    required double lng,
+  }) {
+    _lastLat = lat;
+    _lastLng = lng;
+    _lastLocationSentAt = DateTime.now();
+    if (!_isConnected || orderId.isEmpty) return;
+    _socket!.emit('driver:parcel_location', {
+      'orderId': orderId,
+      'lat': lat,
+      'lng': lng,
+    });
+  }
+
   Future<void> _postLocationViaHttp({
     required double lat,
     required double lng,
@@ -372,8 +389,7 @@ class SocketService {
     double speed = 0,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await SecureTokenStore.read();
       if (token == null || token.isEmpty) return;
       await http.post(
         Uri.parse(ApiConfig.driverLocation),
@@ -412,9 +428,8 @@ class SocketService {
 
   Future<void> _setOnlineViaHttp({required bool isOnline, double? lat, double? lng}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null) return;
+      final token = await SecureTokenStore.read();
+      if (token == null || token.isEmpty) return;
       await http.patch(
         Uri.parse(ApiConfig.driverOnlineStatus),
         headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
