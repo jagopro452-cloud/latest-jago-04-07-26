@@ -125,10 +125,11 @@ class AuthService {
     }
   }
 
-  static Future<Map<String, dynamic>> registerWithPassword(String phone, String password, String fullName, {String? email}) async {
+  static Future<Map<String, dynamic>> registerWithPassword(String phone, String password, String fullName, {String? email, String? gender}) async {
     try {
       final body = {'phone': phone, 'password': password, 'fullName': fullName, 'userType': 'customer'};
       if (email != null && email.trim().isNotEmpty) body['email'] = email.trim();
+      if (gender != null && gender.trim().isNotEmpty) body['gender'] = gender.trim();
       final res = await http.post(
         Uri.parse(ApiConfig.registerAccount),
         headers: _base,

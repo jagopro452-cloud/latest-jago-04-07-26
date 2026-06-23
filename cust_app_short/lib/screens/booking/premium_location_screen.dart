@@ -96,7 +96,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
         : '';
     setState(() {
       _zoneWarning =
-          'We are not serving this area$zoneSuffix yet. Choose a location inside an active service zone.';
+          'We are coming soon to your area$zoneSuffix. JAGO services are available only inside configured service zones.';
     });
   }
 

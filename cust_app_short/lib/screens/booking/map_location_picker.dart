@@ -67,7 +67,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
   String _address = 'Move the map to select location';
   bool _geocoding = false;
   bool _locationLoading = true;
-  bool _serviceable = true;
+  bool _serviceable = false;
   String? _zoneName;
 
   // Search state
@@ -102,7 +102,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
         if (addr.isNotEmpty) {
           setState(() {
             _address = addr;
-            _serviceable = data['serviceable'] != false;
+            _serviceable = data['serviceable'] == true;
             _zoneName = data['zoneName']?.toString();
             _geocoding = false;
           });

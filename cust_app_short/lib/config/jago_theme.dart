@@ -57,6 +57,10 @@ class JT {
   static const Color errorLight = Color(0xFFFEE2E2);
   static const Color success = Color(0xFF16A34A);
   static const Color successLight = Color(0xFFDCFCE7);
+  /// Parcel module brand green (distinct from ride blue)
+  static const Color parcelGreen = Color(0xFF16A34A);
+  static const Color parcelGreenDark = Color(0xFF059669);
+  static const Color parcelGreenLight = Color(0xFF10B981);
   static const Color warning = Color(0xFFF59E0B);
   static const Color warningLight = Color(0xFFFEF3C7);
   static const Color info = Color(0xFF0EA5E9);

@@ -51,9 +51,11 @@ class _OutstationPoolScreenState extends State<OutstationPoolScreen>
       ),
       body: TabBarView(
         controller: _tabs,
-        children: const [
-          _SearchTab(),
-          _BookingsTab(),
+        children: [
+          _SearchTab(
+            onBooked: () => _tabs.animateTo(1),
+          ),
+          const _BookingsTab(),
         ],
       ),
     );
@@ -63,7 +65,8 @@ class _OutstationPoolScreenState extends State<OutstationPoolScreen>
 // ── Search Tab ────────────────────────────────────────────────────────────────
 
 class _SearchTab extends StatefulWidget {
-  const _SearchTab();
+  final VoidCallback? onBooked;
+  const _SearchTab({this.onBooked});
   @override
   State<_SearchTab> createState() => _SearchTabState();
 }
@@ -252,7 +255,7 @@ class _SearchTabState extends State<_SearchTab> {
             ),
           ),
 
-        ..._results.map((r) => _RideCard(ride: r as Map<String, dynamic>)),
+        ..._results.map((r) => _RideCard(ride: r as Map<String, dynamic>, onBooked: widget.onBooked)),
       ],
     );
   }
@@ -274,7 +277,8 @@ class _SearchTabState extends State<_SearchTab> {
 
 class _RideCard extends StatelessWidget {
   final Map<String, dynamic> ride;
-  const _RideCard({required this.ride});
+  final VoidCallback? onBooked;
+  const _RideCard({required this.ride, this.onBooked});
 
   @override
   Widget build(BuildContext context) {
@@ -428,10 +432,7 @@ class _RideCard extends StatelessWidget {
         ride: ride,
         farePerSeat: farePerSeat,
         maxSeats: maxSeats,
-        onBooked: () {
-          _tabs.animateTo(1);
-          _loadMyBookings();
-        },
+        onBooked: onBooked,
       ),
     );
   }

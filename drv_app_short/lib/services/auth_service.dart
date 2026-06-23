@@ -156,6 +156,7 @@ class AuthService {
     String password,
     String fullName, {
     String? email,
+    String? gender,
     String? vehicleNumber,
     String? vehicleModel,
     String? vehicleCategoryId,
@@ -163,6 +164,7 @@ class AuthService {
     try {
       final body = <String, dynamic>{'phone': phone, 'password': password, 'fullName': fullName, 'userType': 'driver'};
       if (email != null && email.trim().isNotEmpty) body['email'] = email.trim();
+      if (gender != null && gender.trim().isNotEmpty) body['gender'] = gender.trim();
       final res = await http.post(
         Uri.parse(ApiConfig.registerAccount),
         headers: _base,

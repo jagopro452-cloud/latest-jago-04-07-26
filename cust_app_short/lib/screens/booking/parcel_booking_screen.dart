@@ -63,37 +63,37 @@ const _kVehicles = [
     key: 'bike_parcel', name: 'Bike Parcel', subtitle: 'Fast & lightweight',
     icon: 'bike', capacity: 'Up to 10 kg', maxKg: 10,
     suitable: 'Documents · Small boxes · Groceries · Medicine',
-    accentColor: Color(0xFF2F7BFF),
+    accentColor: JT.parcelGreen,
   ),
   _ParcelVehicle(
     key: 'auto_parcel', name: 'Auto Parcel', subtitle: 'Goods carrier auto',
     icon: 'auto_parcel', capacity: 'Up to 50 kg', maxKg: 50,
     suitable: 'Medium boxes - Shop supplies - Small furniture',
-    accentColor: JT.primaryDark,
+    accentColor: JT.parcelGreenDark,
   ),
   _ParcelVehicle(
     key: 'tata_ace', name: 'Mini Truck', subtitle: 'Tata Ace · Medium goods',
     icon: 'mini_truck', capacity: 'Up to 500 kg', maxKg: 500,
     suitable: 'Furniture · Appliances · Bulk items · Shop stock',
-    accentColor: JT.secondary,
+    accentColor: Color(0xFF047857),
   ),
   _ParcelVehicle(
     key: 'pickup_truck', name: 'Pickup Truck', subtitle: 'Heavy goods & business',
     icon: 'pickup_truck', capacity: 'Up to 2,000 kg', maxKg: 2000,
     suitable: 'Heavy machinery · Construction · Business logistics',
-    accentColor: Color(0xFF2C95F1),
+    accentColor: Color(0xFF065F46),
   ),
   _ParcelVehicle(
     key: 'bolero_cargo', name: 'Bolero Pickup', subtitle: 'Heavy-duty pickup',
     icon: 'bolero_cargo', capacity: 'Up to 1,500 kg', maxKg: 1500,
     suitable: 'Construction - Heavy equipment - Large shipments',
-    accentColor: Color(0xFF2C95F1),
+    accentColor: JT.parcelGreenLight,
   ),
   _ParcelVehicle(
     key: 'tempo_407', name: 'Tata 407 / Tempo', subtitle: 'Large commercial tempo',
     icon: 'tempo_407', capacity: 'Up to 2,500 kg', maxKg: 2500,
     suitable: 'Factory goods - Large loads - Full shifting',
-    accentColor: Color(0xFF2C95F1),
+    accentColor: JT.parcelGreenDark,
   ),
 ];
 
@@ -222,8 +222,8 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
             .where((v) => _isParcelVehicle(v as Map<String, dynamic>))
             .map<_ParcelVehicle>((v) {
           final m = v as Map<String, dynamic>;
-          final colorStr = m['color']?.toString() ?? m['accentColor']?.toString() ?? '#2F7BFF';
-          final colorVal = int.tryParse(colorStr.replaceFirst('#', '0xFF')) ?? 0xFF2F7BFF;
+          final colorStr = m['color']?.toString() ?? m['accentColor']?.toString() ?? m['accent_color']?.toString() ?? '#16A34A';
+          final colorVal = int.tryParse(colorStr.replaceFirst('#', '0xFF')) ?? 0xFF16A34A;
           final key = m['vehicle_key']?.toString() ?? m['vehicleKey']?.toString() ?? m['key']?.toString() ?? '';
           final capacityLabel = m['capacity_label']?.toString() ?? m['capacityLabel']?.toString();
           final maxKg = (m['max_weight_kg'] as num?)?.toInt() ?? (m['maxWeightKg'] as num?)?.toInt() ?? 10;

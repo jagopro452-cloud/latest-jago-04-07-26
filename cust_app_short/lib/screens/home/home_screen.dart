@@ -55,6 +55,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   double _walletBalance = 0;
   List<Map<String, dynamic>> _vehicleCategories = [];
   List<Map<String, dynamic>> _activeServices = [];
+  bool _inServiceZone = false;
+  String? _zoneStatusMessage;
+  String? _zoneName;
   List<dynamic> _savedPlaces = [];
   List<Map<String, dynamic>> _recentTrips = [];
   Map<String, dynamic>? _activeTrip;
@@ -928,6 +931,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
       }
       _reverseGeocode(pos.latitude, pos.longitude);
+      _fetchActiveServices();
       _mapController?.animateCamera(
         CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 16),
       );
@@ -944,6 +948,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             _pickup = 'Current Location';
           });
           _reverseGeocode(last.latitude, last.longitude);
+          _fetchActiveServices();
           _mapController?.animateCamera(
             CameraUpdate.newLatLngZoom(LatLng(last.latitude, last.longitude), 15),
           );
@@ -1034,7 +1039,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _fetchActiveServices() async {
     try {
       final headers = await AuthService.getHeaders();
-      // Use location-based endpoint for city-filtered services
       final uri =
           Uri.parse(ApiConfig.servicesForLocation).replace(queryParameters: {
         if (_locationReady) 'lat': _pickupLat.toString(),
@@ -1046,10 +1050,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final services = (data['services'] as List<dynamic>?)
                 ?.cast<Map<String, dynamic>>() ??
             [];
-        setState(() => _activeServices = services);
+        setState(() {
+          _activeServices = services;
+          _inServiceZone = data['inZone'] == true;
+          _zoneName = data['zoneName']?.toString();
+          _zoneStatusMessage = data['message']?.toString();
+        });
+        return;
       }
-    } catch (_) {
-      // Fallback to non-location endpoint
+    } catch (_) {}
+
+    // Only use global fallback when location is not ready yet (still detecting GPS).
+    if (!_locationReady) {
       try {
         final headers = await AuthService.getHeaders();
         final r = await http.get(Uri.parse(ApiConfig.activeServices),
@@ -1059,9 +1071,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final services = (data['services'] as List<dynamic>?)
                   ?.cast<Map<String, dynamic>>() ??
               [];
-          setState(() => _activeServices = services);
+          setState(() {
+            _activeServices = services;
+            _inServiceZone = false;
+            _zoneName = null;
+            _zoneStatusMessage =
+                'Enable location to see services available in your area.';
+          });
         }
       } catch (_) {}
+    } else if (mounted) {
+      setState(() {
+        _activeServices = [];
+        _inServiceZone = false;
+        _zoneName = null;
+        _zoneStatusMessage =
+            'We are coming soon to your area. JAGO services are available only inside configured service zones.';
+      });
     }
   }
 
@@ -1107,7 +1133,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return {'emoji': '🛺', 'color': const Color(0xFF5B9DFF)};
       case 'parcel_delivery':
       case 'parcel':
-        return {'emoji': '📦', 'color': const Color(0xFF1A6FDB)};
+        return {'emoji': '📦', 'color': JT.parcelGreen};
       case 'cargo':
       case 'cargo_freight':
         return {'emoji': '🚛', 'color': const Color(0xFF2563EB)};
@@ -1136,20 +1162,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (n.contains('bike parcel') || n.contains('parcel bike'))
       return {
         'icon': Icons.inventory_2_rounded,
-        'color': const Color(0xFF1A6FDB),
-        'gradient': [const Color(0xFF1A6FDB), const Color(0xFF1A6FDB)],
+        'color': JT.parcelGreen,
+        'gradient': [JT.parcelGreen, JT.parcelGreenDark],
       };
     if (n.contains('bike'))
       return {
         'icon': Icons.electric_bike_rounded,
         'color': JT.primary,
-        'gradient': [JT.primary, JT.primary],
+        'gradient': [JT.primary, JT.primaryDark],
       };
     if (n.contains('auto'))
       return {
         'icon': Icons.electric_rickshaw_rounded,
-        'color': const Color(0xFF5B9DFF),
-        'gradient': [const Color(0xFF5B9DFF), const Color(0xFF5B9DFF)],
+        'color': JT.secondary,
+        'gradient': [JT.secondary, JT.primary],
       };
     if (n.contains('truck') ||
         n.contains('cargo') ||
@@ -1157,20 +1183,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         n.contains('pickup'))
       return {
         'icon': Icons.local_shipping_rounded,
-        'color': const Color(0xFF2563EB),
-        'gradient': [const Color(0xFF2563EB), const Color(0xFF2563EB)],
+        'color': JT.parcelGreenDark,
+        'gradient': [JT.parcelGreenDark, JT.parcelGreenLight],
       };
     if (n.contains('parcel') || n.contains('delivery'))
       return {
         'icon': Icons.inventory_2_rounded,
-        'color': const Color(0xFF1A6FDB),
-        'gradient': [const Color(0xFF1A6FDB), const Color(0xFF1A6FDB)],
+        'color': JT.parcelGreen,
+        'gradient': [JT.parcelGreen, JT.parcelGreenDark],
       };
     if (n.contains('suv') || n.contains('car') || n.contains('cab'))
       return {
         'icon': Icons.directions_car_filled_rounded,
-        'color': const Color(0xFF2563EB),
-        'gradient': [const Color(0xFF2563EB), const Color(0xFF2563EB)],
+        'color': JT.primaryDark,
+        'gradient': [JT.primaryDark, JT.primary],
       };
     if (n.contains('pool') ||
         n.contains('share') ||
@@ -1415,6 +1441,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 
                 _buildBannerCarousel(isDark),
+
+                _buildComingSoonBanner(),
+                const SizedBox(height: 12),
                 
                 // Destination Block
                 Padding(
@@ -1525,8 +1554,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       // Book a Ride
                       Expanded(
                         child: GestureDetector(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PremiumLocationScreen(serviceType: 'ride', pickupAddress: _pickup.isNotEmpty ? _pickup : null, pickupLat: _pickupLat, pickupLng: _pickupLng))),
-                          child: Container(
+                          onTap: _hasActiveRideService
+                              ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => PremiumLocationScreen(serviceType: 'ride', pickupAddress: _pickup.isNotEmpty ? _pickup : null, pickupLat: _pickupLat, pickupLng: _pickupLng)))
+                              : () => _showComingSoonSnack('Ride'),
+                          child: Opacity(
+                            opacity: _hasActiveRideService ? 1.0 : 0.55,
+                            child: Container(
                             height: 120, // Reduced height for more compact look
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(colors: [Color(0xFF4F4ACF), Color(0xFF6366F1)], begin: Alignment.topLeft, end: Alignment.bottomRight),
@@ -1561,14 +1594,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               ],
                             ),
                           ),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 14),
                       // Send Parcel
                       Expanded(
                         child: GestureDetector(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelBookingScreen(pickupAddress: _pickup, pickupLat: _pickupLat, pickupLng: _pickupLng))),
-                          child: Container(
+                          onTap: _hasActiveParcelService
+                              ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelBookingScreen(pickupAddress: _pickup, pickupLat: _pickupLat, pickupLng: _pickupLng)))
+                              : () => _showComingSoonSnack('Parcel'),
+                          child: Opacity(
+                            opacity: _hasActiveParcelService ? 1.0 : 0.55,
+                            child: Container(
                             height: 120, // Matching reduced height
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(colors: [Color(0xFFC29763), Color(0xFFD6B58F)], begin: Alignment.topLeft, end: Alignment.bottomRight),
@@ -1603,6 +1641,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               ],
                             ),
                           ),
+                          ),
                         ),
                       ),
                     ],
@@ -1612,14 +1651,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const SizedBox(height: 16),
                 
                 // Our Services Header
+                if (_inServiceZone && _activeServices.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: const Text("Our Services", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF1E293B), letterSpacing: -0.5)),
                 ),
                 
+                if (_inServiceZone && _activeServices.isNotEmpty)
                 const SizedBox(height: 12),
                 
                 // Our Services Grid
+                if (_inServiceZone && _activeServices.isNotEmpty)
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -2103,10 +2145,98 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   bool _isHomeServiceVisible(String serviceKey) {
-    if (_activeServices.isEmpty) {
-      return serviceKey == 'bike_ride' || serviceKey == 'parcel_delivery';
-    }
+    if (!_inServiceZone || _activeServices.isEmpty) return false;
     return _activeServices.any((s) => s['key']?.toString() == serviceKey);
+  }
+
+  void _showComingSoonSnack(String label) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _zoneStatusMessage ??
+              'We are coming soon to your area. JAGO services will be available here soon.',
+          style: GoogleFonts.poppins(fontSize: 13),
+        ),
+        backgroundColor: JT.primaryDark,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Widget _buildComingSoonBanner() {
+    if (_locationReady && _inServiceZone && _activeServices.isNotEmpty) {
+      return const SizedBox.shrink();
+    }
+    final message = _zoneStatusMessage ??
+        (_locationReady
+            ? 'We are coming soon to your area'
+            : 'Detecting your location to show available services');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [JT.primary.withValues(alpha: 0.12), JT.primaryLight.withValues(alpha: 0.08)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: JT.primary.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: JT.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.location_off_rounded, color: JT.primary, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _inServiceZone ? 'Services loading' : 'Coming Soon',
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: JT.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    message,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: JT.textSecondary,
+                      height: 1.35,
+                    ),
+                  ),
+                  if (_zoneName != null && _zoneName!.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Available in $_zoneName',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: JT.primary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Color _accentForServiceKey(String serviceKey) {

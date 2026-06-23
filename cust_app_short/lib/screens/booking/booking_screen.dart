@@ -53,6 +53,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   final VehicleStatusService _vehicleStatusService = VehicleStatusService();
   String? _appliedPromo;
   double _promoDiscount = 0;
+  double _autoDiscountAmount = 0;
+  String? _autoDiscountName;
   bool _promoLoading = false;
   String? _promoError;
   Timer? _debounce;
@@ -422,8 +424,16 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   }
 
   double get _finalFare {
-    final f = double.tryParse(_fare?['estimatedFare']?.toString() ?? '0') ?? 0.0;
-    return (f - _promoDiscount).clamp(0, double.infinity);
+    final discounted = double.tryParse(_fare?['discountedEstimatedFare']?.toString() ?? '');
+    final base = discounted ?? (double.tryParse(_fare?['estimatedFare']?.toString() ?? '0') ?? 0.0);
+    return (base - _promoDiscount).clamp(0, double.infinity);
+  }
+
+  void _syncAutoDiscountFromFare() {
+    final fare = _fare;
+    if (fare == null) return;
+    _autoDiscountAmount = double.tryParse(fare['autoDiscountAmount']?.toString() ?? '0') ?? 0;
+    _autoDiscountName = fare['autoDiscountName']?.toString();
   }
 
   @override
@@ -606,6 +616,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
               });
               if (idx >= 0) _selectedFareIndex = idx;
             }
+            _syncAutoDiscountFromFare();
           });
         } else {
           // Server returned 200 but body wasn't as expected — use fallbacks
@@ -1879,6 +1890,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             if (!isActive) return;
             HapticFeedback.selectionClick();
             setState(() => _selectedFareIndex = i);
+            _syncAutoDiscountFromFare();
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
@@ -2120,6 +2132,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             ],
             Divider(height: 18, color: borderCol, thickness: 1),
             _fareRow('GST (5%)', '₹${gst.toStringAsFixed(0)}', textSub: textSub),
+            if (_autoDiscountAmount > 0 && _appliedPromo == null)
+              _fareRow(_autoDiscountName ?? 'Auto Discount', '-₹${_autoDiscountAmount.toInt()}', positive: true, textSub: textSub),
             if (_promoDiscount > 0)
               _fareRow('Promo Discount', '-₹${_promoDiscount.toInt()}', positive: true, textSub: textSub),
             const SizedBox(height: 8),

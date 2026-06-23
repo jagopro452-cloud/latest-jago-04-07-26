@@ -46,6 +46,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _vehicleYearCtrl = TextEditingController();
   final _vehicleNumCtrl = TextEditingController();
   String _vehicleType = 'bike';
+  String _gender = 'male';
 
   static const List<MapEntry<String, String>> _vehicleTypeOptions = [
     MapEntry('bike', 'Bike (2-wheeler)'),
@@ -143,7 +144,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       // Always get a fresh valid session before submitting.
       // Covers: first registration, re-submission after token expiry, account already exists.
-      final regRes = await AuthService.registerWithPassword(phone, password, name);
+      final regRes = await AuthService.registerWithPassword(phone, password, name, gender: _gender);
       if (regRes['success'] != true) {
         final msg = regRes['message']?.toString() ?? '';
         if (msg.toLowerCase().contains('already') || msg.toLowerCase().contains('exist')) {
@@ -178,6 +179,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'vehicleYear': int.tryParse(_vehicleYearCtrl.text.trim()),
           'vehicleNumber': _vehicleNumCtrl.text.trim().toUpperCase(),
           'vehicleType': _vehicleType,
+          'gender': _gender,
         }),
       );
 
@@ -295,6 +297,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 if (_currentStep == 0) {
                   if (_nameCtrl.text.trim().length < 2) { _showSnack('Enter your full name', error: true); return; }
                   if (_phoneCtrl.text.trim().length != 10) { _showSnack('Enter a valid 10-digit phone number', error: true); return; }
+                  if (_gender.isEmpty) { _showSnack('Select your gender', error: true); return; }
                 }
                 if (_currentStep == 1) {
                   if (!_isStrongPassword(_passwordCtrl.text)) { _showSnack('Use 8+ chars with upper, lower and number', error: true); return; }
@@ -348,6 +351,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _input('Full Name', _nameCtrl, Icons.person),
       const SizedBox(height: 16),
       _phoneInput(),
+      const SizedBox(height: 16),
+      Text('Gender', style: JT.caption.copyWith(fontWeight: FontWeight.w600, color: JT.textPrimary)),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(child: _genderChip('female', 'Female', Icons.female)),
+          const SizedBox(width: 12),
+          Expanded(child: _genderChip('male', 'Male', Icons.male)),
+        ],
+      ),
       const SizedBox(height: 16),
       _datePicker('Date of Birth', _dob, (d) => setState(() => _dob = d)),
       const SizedBox(height: 16),
@@ -664,6 +677,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: Text(s.toUpperCase(), style: JT.bodyPrimary),
           )).toList(),
           onChanged: onChange,
+        ),
+      ),
+    );
+  }
+
+  Widget _genderChip(String value, String label, IconData icon) {
+    final selected = _gender == value;
+    return GestureDetector(
+      onTap: () => setState(() => _gender = value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? JT.primary.withValues(alpha: 0.1) : JT.surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: selected ? JT.primary : JT.border),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: selected ? JT.primary : JT.iconInactive),
+            const SizedBox(width: 6),
+            Text(label, style: JT.caption.copyWith(fontWeight: FontWeight.w600, color: selected ? JT.primary : JT.textSecondary)),
+          ],
         ),
       ),
     );

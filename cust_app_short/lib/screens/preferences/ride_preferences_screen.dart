@@ -136,7 +136,7 @@ class _RidePreferencesScreenState extends State<RidePreferencesScreen> {
                             child: Row(children: [
                               const Icon(Icons.shield, color: Colors.pink, size: 16),
                               SizedBox(width: JT.spacing6),
-                              Expanded(child: Text('Best effort to assign women driver.\nAvailability may vary.', style: JT.caption.copyWith(color: Colors.pink))),
+                              Expanded(child: Text('Nearby women drivers are prioritized first. If none are available, any pilot may be assigned.', style: JT.caption.copyWith(color: Colors.pink))),
                             ]),
                           ),
                         ],
