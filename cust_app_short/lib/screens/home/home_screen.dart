@@ -1133,7 +1133,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return {'emoji': '🛺', 'color': const Color(0xFF5B9DFF)};
       case 'parcel_delivery':
       case 'parcel':
-        return {'emoji': '📦', 'color': JT.parcelGreen};
+        return {'emoji': '📦', 'color': JT.parcelGold};
       case 'cargo':
       case 'cargo_freight':
         return {'emoji': '🚛', 'color': const Color(0xFF2563EB)};
@@ -1162,20 +1162,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (n.contains('bike parcel') || n.contains('parcel bike'))
       return {
         'icon': Icons.inventory_2_rounded,
-        'color': JT.parcelGreen,
-        'gradient': [JT.parcelGreen, JT.parcelGreenDark],
+        'color': JT.parcelGold,
+        'gradient': [JT.parcelGold, JT.parcelGoldLight],
       };
     if (n.contains('bike'))
       return {
         'icon': Icons.electric_bike_rounded,
         'color': JT.primary,
-        'gradient': [JT.primary, JT.primaryDark],
+        'gradient': [JT.primary, JT.primary],
       };
     if (n.contains('auto'))
       return {
         'icon': Icons.electric_rickshaw_rounded,
-        'color': JT.secondary,
-        'gradient': [JT.secondary, JT.primary],
+        'color': const Color(0xFF5B9DFF),
+        'gradient': [const Color(0xFF5B9DFF), const Color(0xFF5B9DFF)],
       };
     if (n.contains('truck') ||
         n.contains('cargo') ||
@@ -1183,20 +1183,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         n.contains('pickup'))
       return {
         'icon': Icons.local_shipping_rounded,
-        'color': JT.parcelGreenDark,
-        'gradient': [JT.parcelGreenDark, JT.parcelGreenLight],
+        'color': const Color(0xFF2563EB),
+        'gradient': [const Color(0xFF2563EB), const Color(0xFF2563EB)],
       };
     if (n.contains('parcel') || n.contains('delivery'))
       return {
         'icon': Icons.inventory_2_rounded,
-        'color': JT.parcelGreen,
-        'gradient': [JT.parcelGreen, JT.parcelGreenDark],
+        'color': JT.parcelGold,
+        'gradient': [JT.parcelGold, JT.parcelGoldLight],
       };
     if (n.contains('suv') || n.contains('car') || n.contains('cab'))
       return {
         'icon': Icons.directions_car_filled_rounded,
-        'color': JT.primaryDark,
-        'gradient': [JT.primaryDark, JT.primary],
+        'color': const Color(0xFF2563EB),
+        'gradient': [const Color(0xFF2563EB), const Color(0xFF2563EB)],
       };
     if (n.contains('pool') ||
         n.contains('share') ||
@@ -1441,9 +1441,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 
                 _buildBannerCarousel(isDark),
-
-                _buildComingSoonBanner(),
-                const SizedBox(height: 12),
                 
                 // Destination Block
                 Padding(
@@ -1557,9 +1554,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           onTap: _hasActiveRideService
                               ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => PremiumLocationScreen(serviceType: 'ride', pickupAddress: _pickup.isNotEmpty ? _pickup : null, pickupLat: _pickupLat, pickupLng: _pickupLng)))
                               : () => _showComingSoonSnack('Ride'),
-                          child: Opacity(
-                            opacity: _hasActiveRideService ? 1.0 : 0.55,
-                            child: Container(
+                          child: Container(
                             height: 120, // Reduced height for more compact look
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(colors: [Color(0xFF4F4ACF), Color(0xFF6366F1)], begin: Alignment.topLeft, end: Alignment.bottomRight),
@@ -1585,15 +1580,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 // New brand image on the left
                                 Positioned(
                                   bottom: -8, left: -8,
-                                  child: const VehicleArtwork(vehicleKey: 'bike', height: 85),
+                                  child: Image.network(
+                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775370325/04bcf87d-433e-4508-b475-78eaee34ff98_qxbn2c.png',
+                                    height: 85,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                  ),
                                 ),
+                                // Large 3D Car Image centered at the bottom
                                 Positioned(
                                   bottom: 10, right: 10,
-                                  child: const VehicleArtwork(vehicleKey: 'cab', height: 80),
+                                  child: Image.network(
+                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775129355/ChatGPT_Image_Apr_2_2026_04_59_00_PM_rlsvjz.png',
+                                    height: 80,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                  ),
                                 ),
                               ],
                             ),
-                          ),
                           ),
                         ),
                       ),
@@ -1604,9 +1609,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           onTap: _hasActiveParcelService
                               ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelBookingScreen(pickupAddress: _pickup, pickupLat: _pickupLat, pickupLng: _pickupLng)))
                               : () => _showComingSoonSnack('Parcel'),
-                          child: Opacity(
-                            opacity: _hasActiveParcelService ? 1.0 : 0.55,
-                            child: Container(
+                          child: Container(
                             height: 120, // Matching reduced height
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(colors: [Color(0xFFC29763), Color(0xFFD6B58F)], begin: Alignment.topLeft, end: Alignment.bottomRight),
@@ -1632,15 +1635,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 // Delivery image on the left side
                                 Positioned(
                                   bottom: -8, left: -8,
-                                  child: const VehicleArtwork(vehicleKey: 'parcel_bike', height: 85),
+                                  child: Image.network(
+                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775367404/be5b86c2-7a8a-4dbd-ad33-e8da2b627d5e_vurdrg.png',
+                                    height: 85,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                  ),
                                 ),
+                                // Large 3D Gift/Box Image centered at the bottom
                                 Positioned(
                                   bottom: 10, right: 10,
-                                  child: const VehicleArtwork(vehicleKey: 'parcel_auto', height: 75),
+                                  child: Image.network(
+                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775128882/ChatGPT_Image_Apr_2_2026_04_47_08_PM_zg8llx.png',
+                                    height: 75,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                  ),
                                 ),
                               ],
                             ),
-                          ),
                           ),
                         ),
                       ),
@@ -1651,17 +1664,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const SizedBox(height: 16),
                 
                 // Our Services Header
-                if (_inServiceZone && _activeServices.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: const Text("Our Services", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF1E293B), letterSpacing: -0.5)),
                 ),
                 
-                if (_inServiceZone && _activeServices.isNotEmpty)
                 const SizedBox(height: 12),
                 
                 // Our Services Grid
-                if (_inServiceZone && _activeServices.isNotEmpty)
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -2145,7 +2155,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   bool _isHomeServiceVisible(String serviceKey) {
-    if (!_inServiceZone || _activeServices.isEmpty) return false;
+    if (_activeServices.isEmpty) {
+      return serviceKey == 'bike_ride' || serviceKey == 'parcel_delivery';
+    }
     return _activeServices.any((s) => s['key']?.toString() == serviceKey);
   }
 
@@ -2160,81 +2172,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         backgroundColor: JT.primaryDark,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  Widget _buildComingSoonBanner() {
-    if (_locationReady && _inServiceZone && _activeServices.isNotEmpty) {
-      return const SizedBox.shrink();
-    }
-    final message = _zoneStatusMessage ??
-        (_locationReady
-            ? 'We are coming soon to your area'
-            : 'Detecting your location to show available services');
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [JT.primary.withValues(alpha: 0.12), JT.primaryLight.withValues(alpha: 0.08)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: JT.primary.withValues(alpha: 0.25)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: JT.primary.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.location_off_rounded, color: JT.primary, size: 24),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _inServiceZone ? 'Services loading' : 'Coming Soon',
-                    style: GoogleFonts.poppins(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: JT.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    message,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: JT.textSecondary,
-                      height: 1.35,
-                    ),
-                  ),
-                  if (_zoneName != null && _zoneName!.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      'Available in $_zoneName',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: JT.primary,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -2267,6 +2204,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  String? _homeServiceImageUrl(String vehicleKey) {
+    switch (vehicleKey) {
+      case 'bike':
+        return 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775123974/bike_logo_g7idrq.png';
+      case 'auto':
+        return 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775125550/ChatGPT_Image_Apr_2_2026_03_55_30_PM_ywb7fj.png';
+      case 'cab':
+        return 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_27_28_AM_w0rcnh';
+      case 'premium':
+        return 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_31_05_AM_kavp5e';
+      case 'parcel_bike':
+      case 'parcel':
+        return 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775126915/ChatGPT_Image_Apr_2_2026_04_18_17_PM_g83nv8.png';
+      case 'delivery':
+        return 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775367404/be5b86c2-7a8a-4dbd-ad33-e8da2b627d5e_vurdrg.png';
+      default:
+        return null;
+    }
+  }
+
   Widget _homeServiceTile({
     required String label,
     required String vehicleKey,
@@ -2275,27 +2232,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     double artworkWidth = 105,
     double artworkRight = -12,
   }) {
+    final imageUrl = _homeServiceImageUrl(vehicleKey);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: JT.surface,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: JT.cardShadow,
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+          ],
         ),
         child: Stack(
           clipBehavior: Clip.none,
           children: [
             Positioned(
-              left: 16,
+              left: label.length > 7 ? 12 : 16,
               top: 0,
               bottom: 0,
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
                   label,
-                  style: GoogleFonts.poppins(
-                    color: JT.textPrimary,
+                  style: TextStyle(
+                    color: const Color(0xFF1E293B),
                     fontSize: labelFontSize,
                     fontWeight: FontWeight.bold,
                   ),
@@ -2306,7 +2266,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               right: artworkRight,
               top: -12,
               bottom: -12,
-              child: VehicleArtwork(vehicleKey: vehicleKey, width: artworkWidth),
+              child: imageUrl != null
+                  ? Image.network(
+                      imageUrl,
+                      width: artworkWidth,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    )
+                  : VehicleArtwork(vehicleKey: vehicleKey, width: artworkWidth),
             ),
           ],
         ),
@@ -2319,9 +2286,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       onTap: _showAllServicesStaticSheet,
       child: Container(
         decoration: BoxDecoration(
-          color: JT.surface,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: JT.cardShadow,
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+          ],
         ),
         child: Stack(
           clipBehavior: Clip.none,
@@ -2335,8 +2304,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   fit: BoxFit.scaleDown,
                   child: Text(
                     'View All',
-                    style: GoogleFonts.poppins(
-                      color: JT.textPrimary,
+                    style: TextStyle(
+                      color: const Color(0xFF1E293B),
                       fontSize: 18 * textScale,
                       fontWeight: FontWeight.bold,
                     ),
@@ -2344,11 +2313,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
-            Positioned(
+            const Positioned(
               right: 12,
               top: 0,
               bottom: 0,
-              child: Icon(Icons.arrow_forward_rounded, color: JT.primary, size: 32),
+              child: Icon(Icons.arrow_forward_rounded, color: Color(0xFF2C95F1), size: 32),
             ),
           ],
         ),
@@ -2462,6 +2431,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ),
     );
+    if (_isHomeServiceVisible('parcel_delivery')) {
+      tiles.add(
+        _homeServiceTile(
+          label: 'Delivery',
+          vehicleKey: 'delivery',
+          labelFontSize: 15 * textScale,
+          artworkWidth: 115,
+          artworkRight: -15,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ParcelBookingScreen(
+                pickupAddress: _pickup,
+                pickupLat: _pickupLat,
+                pickupLng: _pickupLng,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     if (tiles.isNotEmpty) {
       tiles.add(_homeViewAllTile(textScale));

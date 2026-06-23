@@ -832,7 +832,7 @@ class _VoiceBookingScreenState extends State<VoiceBookingScreen>
     final isParcel = _detectedService == 'parcel';
     final isIntercity = _detectedService == 'intercity';
     final label = isParcel ? '📦 Parcel Booking' : isIntercity ? '🛣️ Intercity Trip' : '🚗 Ride Booking';
-    final color = isParcel ? JT.primary : isIntercity ? JT.success : JT.primary;
+    final color = isParcel ? JT.parcelGold : isIntercity ? JT.success : JT.primary;
     return Center(child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(

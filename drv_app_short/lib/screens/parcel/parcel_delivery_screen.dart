@@ -388,7 +388,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
           const Divider(height: 1),
           const SizedBox(height: 10),
           Row(children: [
-            Icon(Icons.info_outline_rounded, size: 14, color: JT.warning),
+            Icon(Icons.info_outline_rounded, size: 14, color: JT.parcelGold),
             const SizedBox(width: 6),
             Expanded(child: Text(_order['notes'].toString(),
               style: GoogleFonts.poppins(fontSize: 12, color: JT.textSecondary))),
@@ -532,7 +532,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
         ),
       _buildAddressCard(
         icon: Icons.flag_rounded,
-        color: JT.warning,
+        color: JT.parcelGold,
         label: 'Drop Location',
         address: drop['address']?.toString() ?? '',
         subtitle: drop['receiverName'] != null
@@ -549,7 +549,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
           icon: const Icon(Icons.check_circle_rounded),
           label: Text('Arrived at Drop', style: GoogleFonts.poppins(fontWeight: FontWeight.w400, fontSize: 15)),
           style: ElevatedButton.styleFrom(
-            backgroundColor: JT.warning,
+            backgroundColor: JT.parcelGold,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -566,7 +566,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
     return Column(children: [
       _buildAddressCard(
         icon: Icons.flag_rounded,
-        color: JT.warning,
+        color: JT.parcelGold,
         label: 'Delivering To',
         address: drop['address']?.toString() ?? '',
         subtitle: drop['receiverName'] != null
@@ -579,7 +579,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
         decoration: BoxDecoration(
           color: JT.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: JT.warning.withValues(alpha: 0.4)),
+          border: Border.all(color: JT.parcelGold.withValues(alpha: 0.4)),
           boxShadow: JT.cardShadow,
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -587,10 +587,10 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: JT.warning.withValues(alpha: 0.1),
+                color: JT.parcelGold.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(Icons.lock_open_rounded, color: JT.warning, size: 20),
+              child: Icon(Icons.lock_open_rounded, color: JT.parcelGold, size: 20),
             ),
             const SizedBox(width: 12),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -619,7 +619,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: JT.warning, width: 2),
+                borderSide: BorderSide(color: JT.parcelGold, width: 2),
               ),
             ),
           ),
@@ -629,7 +629,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
             child: ElevatedButton(
               onPressed: _loading ? null : _verifyDropOtp,
               style: ElevatedButton.styleFrom(
-                backgroundColor: JT.warning,
+                backgroundColor: JT.parcelGold,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

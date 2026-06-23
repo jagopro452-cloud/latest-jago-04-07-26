@@ -180,8 +180,8 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: urgency
-                      ? [const Color(0xFFF59E0B).withValues(alpha: 0.18), const Color(0xFFF59E0B).withValues(alpha: 0.05)]
-                      : [const Color(0xFFF59E0B).withValues(alpha: 0.15), Colors.transparent],
+                      ? [const Color(0xFFC29763).withValues(alpha: 0.18), const Color(0xFFC29763).withValues(alpha: 0.05)]
+                      : [const Color(0xFFC29763).withValues(alpha: 0.15), Colors.transparent],
                   begin: Alignment.topLeft, end: Alignment.bottomRight),
                 border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.06))),
               ),
@@ -194,9 +194,9 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
                         width: 10, height: 10,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFFF59E0B),
+                          color: const Color(0xFFC29763),
                           boxShadow: [BoxShadow(
-                            color: const Color(0xFFF59E0B).withValues(alpha: 0.4 + 0.4 * _pulseCtrl.value),
+                            color: const Color(0xFFC29763).withValues(alpha: 0.4 + 0.4 * _pulseCtrl.value),
                             blurRadius: 8 + 4 * _pulseCtrl.value)],
                         ),
                       ),
@@ -205,7 +205,7 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
                     Text(
                       urgency ? 'Respond Now!' : 'New Parcel Delivery!',
                       style: TextStyle(
-                        color: urgency ? const Color(0xFFF59E0B) : Colors.white,
+                        color: urgency ? const Color(0xFFC29763) : Colors.white,
                         fontSize: 22, fontWeight: FontWeight.w500, letterSpacing: -0.3),
                     ),
                   ]),
@@ -213,14 +213,14 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                      color: const Color(0xFFC29763).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.4))),
+                      border: Border.all(color: const Color(0xFFC29763).withValues(alpha: 0.4))),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       const Text('📦', style: TextStyle(fontSize: 13)),
                       const SizedBox(width: 6),
                       Text(vehicleName, style: const TextStyle(
-                        color: Color(0xFFF59E0B), fontSize: 12, fontWeight: FontWeight.w400, letterSpacing: 0.4)),
+                        color: Color(0xFFC29763), fontSize: 12, fontWeight: FontWeight.w400, letterSpacing: 0.4)),
                     ]),
                   ),
                 ])),
@@ -235,14 +235,14 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
                         strokeWidth: 6,
                         backgroundColor: Colors.white.withValues(alpha: 0.10),
                         valueColor: AlwaysStoppedAnimation<Color>(
-                          urgency ? const Color(0xFFF59E0B) : const Color(0xFFF59E0B).withValues(alpha: 0.7)),
+                          urgency ? const Color(0xFFC29763) : const Color(0xFFC29763).withValues(alpha: 0.7)),
                       ),
                     ),
                   ),
                   Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                     Text('$_countdown',
                       style: TextStyle(
-                        color: urgency ? const Color(0xFFF59E0B) : Colors.white,
+                        color: urgency ? const Color(0xFFC29763) : Colors.white,
                         fontSize: 28, fontWeight: FontWeight.w500, height: 1.0)),
                     Text('sec', style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.4),
@@ -264,13 +264,13 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
                       width: 80, height: 80,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: const Color(0xFFF59E0B).withValues(alpha: 0.08 + 0.06 * _pulseCtrl.value),
-                        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3 + 0.2 * _pulseCtrl.value), width: 2),
+                        color: const Color(0xFFC29763).withValues(alpha: 0.08 + 0.06 * _pulseCtrl.value),
+                        border: Border.all(color: const Color(0xFFC29763).withValues(alpha: 0.3 + 0.2 * _pulseCtrl.value), width: 2),
                         boxShadow: [BoxShadow(
-                          color: const Color(0xFFF59E0B).withValues(alpha: 0.1 + 0.15 * _pulseCtrl.value),
+                          color: const Color(0xFFC29763).withValues(alpha: 0.1 + 0.15 * _pulseCtrl.value),
                           blurRadius: 18 + 8 * _pulseCtrl.value)],
                       ),
-                      child: Icon(vehicleIcon, color: const Color(0xFFF59E0B), size: 38)),
+                      child: Icon(vehicleIcon, color: const Color(0xFFC29763), size: 38)),
                   ),
                   const SizedBox(width: 16),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -281,9 +281,11 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFD97706)]),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFC29763), Color(0xFFD6B58F)],
+                        begin: Alignment.topLeft, end: Alignment.bottomRight),
                       borderRadius: BorderRadius.circular(14),
-                      boxShadow: [BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.4), blurRadius: 12)]),
+                      boxShadow: [BoxShadow(color: const Color(0xFFC29763).withValues(alpha: 0.4), blurRadius: 12)]),
                     child: Text('₹${fare}',
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 24)),
                   ),
@@ -292,7 +294,7 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
 
                 // Stats row
                 Row(children: [
-                  _stat(Icons.place_rounded, '$stops stop${stops > 1 ? 's' : ''}', 'Drops', const Color(0xFFF59E0B)),
+                  _stat(Icons.place_rounded, '$stops stop${stops > 1 ? 's' : ''}', 'Drops', const Color(0xFFC29763)),
                   const SizedBox(width: 8),
                   if (weight.isNotEmpty) _stat(Icons.scale_rounded, '$weight kg', 'Weight', JT.primary),
                   if (isFragile) ...[const SizedBox(width: 8),
@@ -308,7 +310,7 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: Colors.white.withValues(alpha: 0.08))),
                   child: Row(children: [
-                    const Icon(Icons.store_rounded, color: Color(0xFF10B981), size: 20),
+                    const Icon(Icons.store_rounded, color: Color(0xFFC29763), size: 20),
                     const SizedBox(width: 10),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('PICKUP', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 10, fontWeight: FontWeight.w500, letterSpacing: 0.8)),
@@ -331,10 +333,10 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
                     width: double.infinity, height: 76,
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                        colors: [Color(0xFFC29763), Color(0xFFD6B58F)],
                         begin: Alignment.topLeft, end: Alignment.bottomRight),
                       borderRadius: BorderRadius.circular(20),
-                      boxShadow: [BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.45), blurRadius: 24, offset: const Offset(0, 8))]),
+                      boxShadow: [BoxShadow(color: const Color(0xFFC29763).withValues(alpha: 0.45), blurRadius: 24, offset: const Offset(0, 8))]),
                     child: Center(child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                       const Icon(Icons.inventory_2_rounded, color: Colors.white, size: 30),
                       const SizedBox(width: 12),

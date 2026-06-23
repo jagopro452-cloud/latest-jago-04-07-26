@@ -90,9 +90,10 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   ];
 
   static const Color _jagoPrimary = JT.primary;
+  Color get _moduleAccent => _isParcel ? JT.parcelGold : JT.primary;
   static const Color _jagoSecondary = JT.secondary;
 
-  static const Color _blue = Color(0xFF2C95F1); // Brand Blue
+  static const Color _blue = JT.primary;
   static const Color _green = JT.success;
 
   LatLng get _pickupLatLng => LatLng(widget.pickupLat, widget.pickupLng);
@@ -196,8 +197,12 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     return true;
   }
 
-  static Color _accentForVehicle(String name) {
-    return const Color(0xFF2C95F1);
+  Color _accentForVehicle(String name) {
+    final n = name.toLowerCase();
+    if (_isParcel || n.contains('parcel') || n.contains('cargo')) {
+      return JT.parcelGold;
+    }
+    return JT.primary;
   }
 
   // ── Vehicle image URLs (real vehicle images, network with emoji fallback) ──
@@ -1348,7 +1353,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           Polyline( // Production quality curvy road line constraint
             polylineId: const PolylineId('route'),
             points: points,
-            color: _jagoPrimary,
+            color: _moduleAccent,
             width: 5,
             jointType: JointType.round,
             startCap: Cap.roundCap,
@@ -1441,7 +1446,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
                         ),
                         child: Column(
                           children: [
-                            _addressRow(Icons.circle, const Color(0xFF2C95F1), widget.pickup),
+                            _addressRow(Icons.circle, JT.primary, widget.pickup),
                             _addressRow(Icons.location_on, const Color(0xFFEF4444), widget.destination),
                           ],
                         ),
@@ -1619,7 +1624,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   Widget _payBtn(String method, IconData icon, String label) {
     final selected = _paymentMethod == method;
     const blue = Color(0xFF2D8CFF);
-    const lavender = Color(0xFF2C95F1);
+    const lavender = JT.primary;
     
     return GestureDetector(
       onTap: () {
@@ -1749,7 +1754,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     IconData icon;
     switch (tag) {
       case 'FASTEST':
-        color = const Color(0xFF2C95F1); // Premium Purple matching image
+        color = JT.primary; // Premium Purple matching image
         icon = Icons.bolt_rounded;
         break;
       case 'SAVER':
@@ -1881,7 +1886,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         final subtitle = isActive ? '$etaMins min • Drop $dropTime' : 'Currently Unavailable';
 
         // Elite Selection Palette
-        final Color selColor = const Color(0xFF2C95F1); // Jago Lavender
+        final Color selColor = JT.primary; // Jago Lavender
         final Color blueColor = const Color(0xFF2D8CFF); // Jago Blue
         
         return GestureDetector(
@@ -2034,15 +2039,15 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         Container(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
           decoration: BoxDecoration(
-            color: _jagoPrimary.withValues(alpha: 0.06),
+            color: _moduleAccent.withValues(alpha: 0.06),
             borderRadius: const BorderRadius.only(topLeft: Radius.circular(15), topRight: Radius.circular(15)),
             border: Border(bottom: BorderSide(color: borderCol)),
           ),
           child: Row(children: [
-            const Icon(Icons.receipt_long_rounded, size: 16, color: _jagoPrimary),
+            Icon(Icons.receipt_long_rounded, size: 16, color: _moduleAccent),
             const SizedBox(width: 8),
             Text(_isParcel ? 'Delivery Fare Details' : 'Fare Breakdown',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w400, color: _jagoPrimary)),
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w400, color: _moduleAccent)),
             const Spacer(),
             if (isMinFareApplied)
               Container(
@@ -2059,12 +2064,12 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2C95F1).withValues(alpha: 0.12),
+                  color: JT.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF2C95F1).withValues(alpha: 0.3)),
+                  border: Border.all(color: JT.primary.withValues(alpha: 0.3)),
                 ),
                 child: const Text('Night fare', style: TextStyle(
-                  fontSize: 10, color: Color(0xFF2C95F1), fontWeight: FontWeight.w400)),
+                  fontSize: 10, color: JT.primary, fontWeight: FontWeight.w400)),
               )
             else
               Text('Incl. GST', style: TextStyle(fontSize: 10, color: Colors.grey[400], fontWeight: FontWeight.w500)),
@@ -2095,17 +2100,17 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
                 margin: const EdgeInsets.symmetric(vertical: 4),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                  color: JT.parcelGold.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.2)),
+                  border: Border.all(color: JT.parcelGold.withValues(alpha: 0.2)),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.person_2_rounded, size: 13, color: Color(0xFF10B981)),
+                  Icon(Icons.person_2_rounded, size: 13, color: JT.parcelGold),
                   const SizedBox(width: 6),
                   Expanded(child: Text('Helper Charge (loading/unloading)',
                     style: TextStyle(fontSize: 11, color: textSub))),
                   Text('₹${helperCharge.toStringAsFixed(0)}',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF10B981))),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: JT.parcelGold)),
                 ]),
               )
             else if (!_isParcel && helperCharge > 0)
@@ -2114,7 +2119,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             if (isNight) ...[
               const SizedBox(height: 2),
               Row(children: [
-                const Icon(Icons.nightlight_round, size: 12, color: Color(0xFF2C95F1)),
+                Icon(Icons.nightlight_round, size: 12, color: JT.primary),
                 const SizedBox(width: 5),
                 Text('Night fare applies (1.0x–1.25x)',
                   style: TextStyle(fontSize: 11, color: textSub, fontStyle: FontStyle.italic)),
@@ -2147,7 +2152,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
               const Spacer(),
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Text('₹${_finalFare.toStringAsFixed(0)}',
-                  style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w500, color: _jagoPrimary)),
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w500, color: _moduleAccent)),
                 Text('incl. GST', style: TextStyle(fontSize: 10, color: Colors.grey[400])),
               ]),
             ]),
@@ -2182,17 +2187,17 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xFF86EFAC))),
         child: Row(children: [
-          const Icon(Icons.local_offer_rounded, color: Color(0xFF16A34A), size: 18),
+          Icon(Icons.local_offer_rounded, color: _moduleAccent, size: 18),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('$_appliedPromo applied!',
-              style: const TextStyle(fontWeight: FontWeight.w500, color: Color(0xFF16A34A), fontSize: 13)),
+              style: TextStyle(fontWeight: FontWeight.w500, color: _moduleAccent, fontSize: 13)),
             Text('You save ₹${_promoDiscount.toInt()}',
               style: TextStyle(color: Colors.green[700], fontSize: 12)),
           ])),
           GestureDetector(
             onTap: () => setState(() { _appliedPromo = null; _promoDiscount = 0; _promoCtrl.clear(); }),
-            child: const Icon(Icons.close_rounded, color: Color(0xFF16A34A), size: 20)),
+            child: Icon(Icons.close_rounded, color: _moduleAccent, size: 20)),
         ]),
       );
     }
@@ -2203,7 +2208,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         border: Border.all(color: borderCol)),
       child: Column(children: [
         Row(children: [
-          const Icon(Icons.local_offer_outlined, color: _jagoPrimary, size: 18),
+          Icon(Icons.local_offer_outlined, color: _moduleAccent, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: TextField(
@@ -2220,8 +2225,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           GestureDetector(
             onTap: _promoLoading ? null : _applyPromo,
             child: _promoLoading
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _jagoPrimary))
-              : const Text('APPLY', style: TextStyle(color: _jagoPrimary, fontSize: 13, fontWeight: FontWeight.w400)),
+              ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _moduleAccent))
+              : Text('APPLY', style: TextStyle(color: _moduleAccent, fontSize: 13, fontWeight: FontWeight.w400)),
           ),
         ]),
         if (_promoError != null)
@@ -2280,14 +2285,14 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: isSelected
             ? BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF2C95F1), Color(0xFF6366F1)], 
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                gradient: _isParcel ? JT.parcelGrad : JT.grad,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
-                  BoxShadow(color: const Color(0xFF2C95F1).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
+                  BoxShadow(
+                      color: (_isParcel ? JT.parcelGold : JT.primary)
+                          .withValues(alpha: 0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4)),
                 ],
               )
             : null,

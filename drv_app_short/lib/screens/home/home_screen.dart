@@ -2259,19 +2259,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                       return Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                         decoration: BoxDecoration(
-                          color: JT.primaryLight,
+                          color: JT.parcelGoldSoft,
                           borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: JT.primary.withValues(alpha: 0.2)),
+                          border: Border.all(color: JT.parcelGold.withValues(alpha: 0.35)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.inventory_2_rounded, color: JT.primary, size: 15),
+                            const Icon(Icons.inventory_2_rounded, color: JT.parcelGold, size: 15),
                             const SizedBox(width: 6),
                             Text(
                               capacity.isNotEmpty ? '$name - $capacity' : name,
                               style: GoogleFonts.poppins(
-                                color: JT.primaryDark,
+                                color: JT.parcelGoldDark,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
                               ),

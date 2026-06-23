@@ -83,9 +83,11 @@ class _TrackingScreenState extends State<TrackingScreen>
       if (mounted) {
         setState(() => _isConnected = connected);
         if (!connected) {
-          _showStatusBanner('Waiting for connection...', Colors.orange);
+          _showStatusBanner('Waiting for connection...', widget.isParcel ? JT.parcelGold : JT.primary);
         } else {
-          _showStatusBanner('Reconnected!', const Color(0xFF10B981));
+          _showStatusBanner(
+              'Reconnected!',
+              widget.isParcel ? JT.parcelGold : const Color(0xFF10B981));
           // Re-join tracking room on every reconnect
           if (widget.isParcel) {
             _socket.trackParcel(widget.tripId);
@@ -716,6 +718,42 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   void _handleStatusTransition(String newStatus) {
     _restartPollTimer();
+    if (widget.isParcel) {
+      if (newStatus == 'accepted' || newStatus == 'driver_assigned') {
+        _showStatusBanner('Delivery partner assigned', JT.parcelGold);
+        _announceStatus('accepted');
+        _updateMapMarkers();
+      } else if (newStatus == 'picked_up') {
+        _showStatusBanner('Parcel picked up', JT.parcelGoldDark);
+        _updateMapMarkers();
+      } else if (newStatus == 'in_transit') {
+        _animateToDestination();
+        _showStatusBanner('Parcel on the way', JT.parcelGold);
+        _fetchRouteForStatus();
+        _updateMapMarkers();
+      } else if (newStatus == 'completed') {
+        _showStatusBanner('Parcel delivered • Thank you!', JT.parcelGoldDark);
+        setState(() => _polylines.clear());
+        _updateMapMarkers();
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TripCompletionScreen(
+                  trip: _trip ?? {'id': widget.tripId},
+                  walletPendingAmount: _walletPendingAmount,
+                ),
+              ),
+            );
+          }
+        });
+      } else if (newStatus == 'cancelled') {
+        _showStatusBanner('Delivery cancelled', const Color(0xFFDC2626));
+        setState(() => _polylines.clear());
+      }
+      return;
+    }
     if (newStatus == 'accepted' || newStatus == 'driver_assigned') {
       _showStatusBanner('Pilot accepted your ride', JT.primary);
       _announceStatus('accepted');
@@ -1202,6 +1240,7 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   void _showBookingTimeoutWarning() {
     if (!mounted) return;
+    final accent = widget.isParcel ? JT.parcelGold : JT.primary;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1213,11 +1252,11 @@ class _TrackingScreenState extends State<TrackingScreen>
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+              color: accent.withValues(alpha: 0.12),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.timer_outlined,
-                color: Color(0xFFF59E0B), size: 22),
+            child: Icon(Icons.timer_outlined,
+                color: accent, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1964,6 +2003,8 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Widget _buildPremiumHeader(Map<String, dynamic> statusInfo, String? otp) {
     final color = statusInfo['color'] as Color;
+    final accent = widget.isParcel ? JT.parcelGold : const Color(0xFF10B981);
+    final pinAccent = widget.isParcel ? JT.parcelGold : JT.primary;
     final showOtp = otp != null &&
         otp.isNotEmpty &&
         (_status == 'driver_assigned' ||
@@ -2039,11 +2080,11 @@ class _TrackingScreenState extends State<TrackingScreen>
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                          color: pinAccent.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.stars_rounded,
-                            color: Color(0xFF6366F1), size: 18),
+                        child: Icon(Icons.stars_rounded,
+                            color: pinAccent, size: 18),
                       ),
                       const SizedBox(width: 12),
                       Column(
@@ -2082,11 +2123,11 @@ class _TrackingScreenState extends State<TrackingScreen>
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                          color: accent.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.timer_rounded,
-                            color: Color(0xFF10B981), size: 18),
+                        child: Icon(Icons.timer_rounded,
+                            color: accent, size: 18),
                       ),
                       const SizedBox(width: 12),
                       Column(
@@ -2305,6 +2346,7 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Widget _buildSearchingView(Map<String, dynamic>? trip, dynamic actualFare, dynamic estimatedFare) {
+    final liveColor = widget.isParcel ? JT.parcelGold : JT.primary;
     final fareVal = actualFare ?? estimatedFare ?? '--';
     final dist = trip?['estimatedDistance'] ?? trip?['estimated_distance'] ?? '--';
     final duration = trip?['estimatedDurationMinutes'] ?? trip?['estimated_duration'] ?? trip?['etaMinutes'] ?? '--';
@@ -2336,7 +2378,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                   style: GoogleFonts.poppins(
                     fontSize: 26,
                     fontWeight: FontWeight.w800,
-                    color: const Color(0xFF2C95F1),
+                    color: liveColor,
                     height: 1.0,
                   ),
                 ),
@@ -2360,7 +2402,7 @@ class _TrackingScreenState extends State<TrackingScreen>
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+            border: Border.all(color: liveColor.withValues(alpha: 0.3)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -2368,8 +2410,8 @@ class _TrackingScreenState extends State<TrackingScreen>
               Container(
                 width: 8,
                 height: 8,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF10B981),
+                decoration: BoxDecoration(
+                  color: liveColor,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -2379,7 +2421,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                 style: GoogleFonts.poppins(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: const Color(0xFF10B981),
+                  color: liveColor,
                 ),
               ),
               const SizedBox(width: 6),
@@ -2405,9 +2447,9 @@ class _TrackingScreenState extends State<TrackingScreen>
         const SizedBox(height: 16),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
-          child: const LinearProgressIndicator(
-            backgroundColor: Color(0xFFF1F5F9),
-            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2C95F1)),
+          child: LinearProgressIndicator(
+            backgroundColor: const Color(0xFFF1F5F9),
+            valueColor: AlwaysStoppedAnimation<Color>(liveColor),
             minHeight: 4,
           ),
         ),
@@ -2446,24 +2488,26 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Widget _buildTripDetailPill(IconData icon, String text) {
+    final accent = widget.isParcel ? JT.parcelGold : JT.primary;
+    final bg = widget.isParcel ? JT.parcelGoldSoft : JT.primaryLight;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0F7FF),
+        color: bg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF2C95F1).withValues(alpha: 0.2)),
+        border: Border.all(color: accent.withValues(alpha: 0.2)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: const Color(0xFF2C95F1)),
+          Icon(icon, size: 16, color: accent),
           const SizedBox(width: 6),
           Text(
             text,
             style: GoogleFonts.poppins(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFF1E40AF),
+              color: widget.isParcel ? JT.parcelGoldDark : JT.primaryDark,
             ),
           ),
         ],
@@ -2578,10 +2622,11 @@ class _TrackingScreenState extends State<TrackingScreen>
     final fareVal = actualFare ?? estimatedFare;
     final dist = trip['estimatedDistance'] ?? trip['estimated_distance'];
     final vehicle = trip['vehicleName'] ?? trip['vehicle_name'];
+    final fareColor = widget.isParcel ? JT.parcelGold : const Color(0xFF10B981);
     return Wrap(spacing: 8, children: [
       if (fareVal != null)
         _chip(
-            Icons.currency_rupee_rounded, '₹$fareVal', const Color(0xFF10B981)),
+            Icons.currency_rupee_rounded, '₹$fareVal', fareColor),
       if (dist != null)
         _chip(Icons.route_rounded, '$dist km', const Color(0xFF6B7280)),
       if (vehicle != null)
@@ -2640,38 +2685,38 @@ class _TrackingScreenState extends State<TrackingScreen>
           return {
             'label': 'Finding a delivery partner...',
             'icon': Icons.radar_rounded,
-            'color': JT.primary,
+            'color': JT.parcelGold,
           };
         case 'driver_assigned':
         case 'accepted':
           return {
             'label': 'Partner assigned — heading to pickup',
             'icon': Icons.local_shipping_rounded,
-            'color': JT.primary,
+            'color': JT.parcelGold,
           };
         case 'picked_up':
           return {
             'label': 'Parcel picked up',
             'icon': Icons.inventory_2_rounded,
-            'color': JT.success,
+            'color': JT.parcelGoldDark,
           };
         case 'in_transit':
           return {
             'label': 'Parcel on the way',
             'icon': Icons.navigation_rounded,
-            'color': JT.primary,
+            'color': JT.parcelGold,
           };
         case 'completed':
           return {
             'label': 'Parcel delivered',
             'icon': Icons.check_circle_rounded,
-            'color': JT.success,
+            'color': JT.parcelGoldDark,
           };
         case 'cancelled':
           return {
             'label': 'Delivery cancelled',
             'icon': Icons.cancel_rounded,
-            'color': JT.primaryDark,
+            'color': JT.parcelGoldDark,
           };
         default:
           return {
@@ -2832,7 +2877,9 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   void _showArrivalBanner() {
-    _showStatusBanner('Your pilot is arrived', const Color(0xFF10B981));
+    _showStatusBanner(
+        'Your pilot is arrived',
+        widget.isParcel ? JT.parcelGold : const Color(0xFF10B981));
   }
 
   Widget _buildInProgressPanel(Map<String, dynamic> trip) {
@@ -2996,14 +3043,14 @@ class _TrackingScreenState extends State<TrackingScreen>
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: isSelected
             ? BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF2C95F1), Color(0xFF6366F1)], 
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                gradient: widget.isParcel ? JT.parcelGrad : JT.grad,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
-                  BoxShadow(color: const Color(0xFF2C95F1).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
+                  BoxShadow(
+                      color: (widget.isParcel ? JT.parcelGold : JT.primary)
+                          .withValues(alpha: 0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4)),
                 ],
               )
             : null,

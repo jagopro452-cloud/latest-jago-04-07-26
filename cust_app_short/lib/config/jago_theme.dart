@@ -57,10 +57,14 @@ class JT {
   static const Color errorLight = Color(0xFFFEE2E2);
   static const Color success = Color(0xFF16A34A);
   static const Color successLight = Color(0xFFDCFCE7);
-  /// Parcel module brand green (distinct from ride blue)
-  static const Color parcelGreen = Color(0xFF16A34A);
-  static const Color parcelGreenDark = Color(0xFF059669);
-  static const Color parcelGreenLight = Color(0xFF10B981);
+  /// Parcel module — original JAGO gold (Send Parcel home card)
+  static const Color parcelGold = Color(0xFFC29763);
+  static const Color parcelGoldLight = Color(0xFFD6B58F);
+  static const Color parcelGoldDark = Color(0xFFA67C4A);
+  static const Color parcelGoldSoft = Color(0xFFF8F0E8);
+  static const Color parcelGreen = Color(0xFFC29763);
+  static const Color parcelGreenDark = Color(0xFFA67C4A);
+  static const Color parcelGreenLight = Color(0xFFD6B58F);
   static const Color warning = Color(0xFFF59E0B);
   static const Color warningLight = Color(0xFFFEF3C7);
   static const Color info = Color(0xFF0EA5E9);
@@ -78,6 +82,68 @@ class JT {
     begin: Alignment.bottomLeft,
     end: Alignment.topRight,
   );
+
+  static const LinearGradient parcelGrad = LinearGradient(
+    colors: [Color(0xFFC29763), Color(0xFFD6B58F)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  /// Module-aware accents — ride = blue, parcel = gold (forms & navigation)
+  static Color moduleAccent(bool isParcel) =>
+      isParcel ? parcelGold : primary;
+
+  static Color moduleAccentDark(bool isParcel) =>
+      isParcel ? parcelGoldDark : primaryDark;
+
+  static Color moduleAccentLight(bool isParcel) =>
+      isParcel ? parcelGoldSoft : primaryLight;
+
+  static Color moduleFieldBorder(bool isParcel) => isParcel
+      ? parcelGold.withValues(alpha: 0.28)
+      : const Color(0xFFE8EFFF);
+
+  static Color moduleFieldBg(bool isParcel) =>
+      isParcel ? parcelGoldSoft : const Color(0xFFF5F7FF);
+
+  static Color modulePickupDot(bool isParcel) =>
+      isParcel ? parcelGold : primary;
+
+  static Color moduleDropDot(bool isParcel) =>
+      isParcel ? parcelGoldDark : primary;
+
+  static LinearGradient moduleButtonGrad(bool isParcel) =>
+      isParcel ? parcelGrad : grad;
+
+  static InputDecoration moduleFieldDecoration({
+    required bool isParcel,
+    required String hintText,
+    Widget? prefixIcon,
+    int maxLines = 1,
+  }) {
+    final accent = moduleAccent(isParcel);
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: GoogleFonts.poppins(fontSize: 13, color: textTertiary),
+      prefixIcon: prefixIcon,
+      filled: true,
+      fillColor: isParcel ? parcelGoldSoft : bgSoft,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: moduleFieldBorder(isParcel)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: accent, width: 1.5),
+      ),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    );
+  }
 
   // ── SHADOWS — Premium Elevation System ──
   static List<BoxShadow> get shadowXs => [

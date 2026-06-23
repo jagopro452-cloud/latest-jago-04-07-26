@@ -81,8 +81,10 @@ class _LocationScreenState extends State<LocationScreen>
 
   // ── Theme ─────────────────────────────────────────────────────────────────
   bool get _isParcel => widget.serviceType == 'parcel';
-  Color get _accent => JT.primary;
-  Color get _accentLight => JT.primaryLight;
+  Color get _accent => JT.moduleAccent(_isParcel);
+  Color get _accentLight => JT.moduleAccentLight(_isParcel);
+  Color get _fieldBorder => JT.moduleFieldBorder(_isParcel);
+  Color get _fieldBg => JT.moduleFieldBg(_isParcel);
 
   @override
   void initState() {
@@ -736,9 +738,10 @@ class _LocationScreenState extends State<LocationScreen>
       context,
       MaterialPageRoute(
         builder: (_) => MapLocationPicker(
-          title: 'Select Drop Location',
+          title: _isParcel ? 'Select delivery location' : 'Select Drop Location',
           initialLat: _pickupLat != 0 ? _pickupLat : null,
           initialLng: _pickupLng != 0 ? _pickupLng : null,
+          accentColor: _accent,
         ),
       ),
     );
@@ -775,9 +778,9 @@ class _LocationScreenState extends State<LocationScreen>
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: const Color(0xFFF5F7FF),
+              color: _fieldBg,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE8EFFF)),
+              border: Border.all(color: _fieldBorder),
             ),
             child: const Icon(Icons.arrow_back_ios_new_rounded,
                 size: 18, color: JT.textPrimary),
@@ -847,7 +850,7 @@ class _LocationScreenState extends State<LocationScreen>
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE8EFFF)),
+          border: Border.all(color: _fieldBorder),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.06),
@@ -867,15 +870,15 @@ class _LocationScreenState extends State<LocationScreen>
                 width: 10,
                 height: 10,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF16A34A),
+                  color: _accent,
                   shape: BoxShape.circle,
                   border: Border.all(
-                      color: const Color(0xFF16A34A).withValues(alpha: 0.3),
+                      color: _accent.withValues(alpha: 0.3),
                       width: 3),
                   boxShadow: [
                     BoxShadow(
                         color:
-                            const Color(0xFF16A34A).withValues(alpha: 0.3),
+                            _accent.withValues(alpha: 0.3),
                         blurRadius: 6)
                   ],
                 ),
@@ -941,7 +944,7 @@ class _LocationScreenState extends State<LocationScreen>
                         margin: const EdgeInsets.symmetric(horizontal: 1),
                         height: 1,
                         color: i.isEven
-                            ? const Color(0xFFE8EFFF)
+                            ? _fieldBorder
                             : Colors.transparent,
                       ),
                     ))),
@@ -1012,11 +1015,11 @@ class _LocationScreenState extends State<LocationScreen>
           // ── Action buttons ──
           Container(
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFF),
+              color: _accentLight,
               borderRadius:
                   const BorderRadius.vertical(bottom: Radius.circular(16)),
-              border: const Border(
-                  top: BorderSide(color: Color(0xFFE8EFFF))),
+              border: Border(
+                  top: BorderSide(color: _fieldBorder)),
             ),
             padding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -1108,12 +1111,12 @@ class _LocationScreenState extends State<LocationScreen>
         decoration: BoxDecoration(
           color: isDestructive
               ? const Color(0xFFFEF2F2)
-              : const Color(0xFFF0F7FF),
+              : _accentLight,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isDestructive
                 ? const Color(0xFFFCA5A5)
-                : const Color(0xFFBFDBFE),
+                : _accent.withValues(alpha: 0.35),
           ),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1122,7 +1125,7 @@ class _LocationScreenState extends State<LocationScreen>
             size: 14,
             color: isDestructive
                 ? const Color(0xFFEF4444)
-                : JT.primary,
+                : _accent,
           ),
           const SizedBox(width: 4),
           Text(
@@ -1132,7 +1135,7 @@ class _LocationScreenState extends State<LocationScreen>
               fontWeight: FontWeight.w500,
               color: isDestructive
                   ? const Color(0xFFEF4444)
-                  : JT.primary,
+                  : _accent,
             ),
           ),
         ]),
@@ -1142,13 +1145,14 @@ class _LocationScreenState extends State<LocationScreen>
 
   // ── Add Stop Field ─────────────────────────────────────────────────────────
   Widget _buildStopField() {
+    final stopColor = _isParcel ? JT.parcelGold : JT.secondary;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE8EFFF)),
+        border: Border.all(color: _fieldBorder),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1162,10 +1166,10 @@ class _LocationScreenState extends State<LocationScreen>
           width: 10,
           height: 10,
           decoration: BoxDecoration(
-            color: const Color(0xFFF59E0B),
+            color: stopColor,
             shape: BoxShape.circle,
             border: Border.all(
-                color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+                color: stopColor.withValues(alpha: 0.3),
                 width: 3),
           ),
         ),
@@ -1190,8 +1194,8 @@ class _LocationScreenState extends State<LocationScreen>
             onChanged: _onStopChanged,
           ),
         ),
-        const Icon(Icons.add_circle_outline_rounded,
-            size: 18, color: Color(0xFFF59E0B)),
+        Icon(Icons.add_circle_outline_rounded,
+            size: 18, color: stopColor),
       ]),
     );
   }
@@ -1212,7 +1216,7 @@ class _LocationScreenState extends State<LocationScreen>
             mainText: 'Current Location',
             secondaryText: 'Using GPS for accuracy',
             icon: Icons.my_location_rounded,
-            iconColor: JT.primary,
+            iconColor: _accent,
             onTap: () {
               // Usually handled by the manual map picker or geocoding
               _pickDropOnMap(); 
@@ -1302,7 +1306,7 @@ class _LocationScreenState extends State<LocationScreen>
                     secondaryText: 'Popular Location',
                     distanceKm: dist > 0 ? dist : null,
                     icon: Icons.place_rounded,
-                    iconColor: const Color(0xFFF59E0B),
+                    iconColor: _accent,
                     onTap: () => _selectValidatedLocation(
                       p['name'] ?? '',
                       (p['lat'] as num).toDouble(),
@@ -1448,8 +1452,8 @@ class _LocationScreenState extends State<LocationScreen>
           ),
           Container(
             padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFF),
+                  decoration: BoxDecoration(
+                    color: _accentLight,
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.arrow_forward_ios_rounded,

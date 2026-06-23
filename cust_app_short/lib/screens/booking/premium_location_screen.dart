@@ -63,6 +63,11 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
   List<Map<String, dynamic>> _recentTrips = [];
   bool _isLoadingTrips = true;
 
+  bool get _isParcel => widget.serviceType == 'parcel';
+  Color get _accent => JT.moduleAccent(_isParcel);
+  Color get _accentLight => JT.moduleAccentLight(_isParcel);
+  Color get _fieldBorder => JT.moduleFieldBorder(_isParcel);
+
   @override
   void initState() {
     super.initState();
@@ -443,14 +448,23 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                 child: Container(
                   height: 56,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2C95F1),
+                    gradient: JT.moduleButtonGrad(_isParcel),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
-                      BoxShadow(color: const Color(0xFF2C95F1).withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10))
+                      BoxShadow(
+                          color: _accent.withOpacity(0.3),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10))
                     ],
                   ),
                   child: Center(
-                    child: Text("Set your journey", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                    child: Text(
+                      _isParcel ? 'Continue to parcel' : 'Set your journey',
+                      style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white),
+                    ),
                   ),
                 ),
               ),
@@ -473,7 +487,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
         // Location indicator
         Expanded(
           child: Row(children: [
-            Icon(Icons.location_on_rounded, color: JT.primary, size: 13),
+            Icon(Icons.location_on_rounded, color: _accent, size: 13),
             const SizedBox(width: 3),
             Flexible(
               child: Text(
@@ -496,9 +510,9 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(color: JT.surfaceAlt, borderRadius: BorderRadius.circular(20)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.account_balance_wallet_rounded, color: JT.primary, size: 13),
+              Icon(Icons.account_balance_wallet_rounded, color: _accent, size: 13),
               const SizedBox(width: 4),
-              Text('Wallet', style: GoogleFonts.poppins(color: JT.primary, fontSize: 12, fontWeight: FontWeight.w500)),
+              Text('Wallet', style: GoogleFonts.poppins(color: _accent, fontSize: 12, fontWeight: FontWeight.w500)),
             ]),
           ),
         ),
@@ -509,8 +523,8 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
           child: Container(
             width: 36,
             height: 36,
-            decoration: BoxDecoration(color: JT.primary.withOpacity(0.08), shape: BoxShape.circle),
-            child: Icon(Icons.notifications_none_rounded, color: JT.primary, size: 20),
+            decoration: BoxDecoration(color: _accent.withOpacity(0.08), shape: BoxShape.circle),
+            child: Icon(Icons.notifications_none_rounded, color: _accent, size: 20),
           ),
         ),
       ]),
@@ -560,16 +574,16 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: isSelected
             ? BoxDecoration(
-                color: const Color(0xFF2C95F1).withOpacity(0.1),
+                color: _accent.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(20),
               )
             : const BoxDecoration(),
         child: Row(
           children: [
-            Icon(isSelected ? activeIcon : inactiveIcon, color: isSelected ? const Color(0xFF2C95F1) : const Color(0xFF94A3B8), size: 22),
+            Icon(isSelected ? activeIcon : inactiveIcon, color: isSelected ? _accent : const Color(0xFF94A3B8), size: 22),
             if (isSelected) ...[
               const SizedBox(width: 6),
-              Text(label, style: GoogleFonts.poppins(color: const Color(0xFF2C95F1), fontSize: 13, fontWeight: FontWeight.w600)),
+              Text(label, style: GoogleFonts.poppins(color: _accent, fontSize: 13, fontWeight: FontWeight.w600)),
             ]
           ],
         ),
@@ -613,7 +627,8 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(
+            color: _isParcel ? _fieldBorder : const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.02),
@@ -632,8 +647,8 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
               Container(
                 width: 12,
                 height: 12,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF10B981), // Green dot
+                decoration: BoxDecoration(
+                  color: JT.modulePickupDot(_isParcel),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -646,7 +661,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                 width: 12,
                 height: 12,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2C95F1), // Blue square for their theme
+                  color: JT.moduleDropDot(_isParcel),
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -659,16 +674,16 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildInputField(
-                  label: "FROM",
-                  hint: "Starting point?",
+                  label: _isParcel ? "PICKUP" : "FROM",
+                  hint: _isParcel ? "Pickup address?" : "Starting point?",
                   controller: _pickupCtrl,
                   focusNode: _pickupFocus,
                   isPickup: true,
                 ),
                 const Divider(height: 24, color: Color(0xFFF1F5F9), thickness: 1.5),
                 _buildInputField(
-                  label: "DROP",
-                  hint: "Where to?",
+                  label: _isParcel ? "DELIVER TO" : "DROP",
+                  hint: _isParcel ? "Delivery address?" : "Where to?",
                   controller: _dropCtrl,
                   focusNode: _dropFocus,
                   isPickup: false,
@@ -730,10 +745,10 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
               ),
             ),
             if ((_detectingLocation && isPickup) || (_searching && focusNode.hasFocus))
-              const SizedBox(
+              SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2C95F1)),
+                child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
               )
             else if (controller.text.isNotEmpty && focusNode.hasFocus)
               GestureDetector(
@@ -755,7 +770,10 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
         Expanded(
           child: GestureDetector(
             onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const MapLocationPicker())).then((res) {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => MapLocationPicker(
+                title: _isParcel ? 'Select delivery location' : 'Select drop location',
+                accentColor: _accent,
+              ))).then((res) {
                 if (res != null) {
                   setState(() {
                     _drop = res.address;
@@ -776,7 +794,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.map_outlined, color: Color(0xFF2C95F1), size: 18),
+                  Icon(Icons.map_outlined, color: _accent, size: 18),
                   const SizedBox(width: 8),
                   Text("Select on map", style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B))),
                 ],
@@ -813,9 +831,9 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
 
   Widget _buildRecentRides() {
     if (_isLoadingTrips) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.symmetric(vertical: 40),
-        child: Center(child: CircularProgressIndicator(color: Color(0xFF2C95F1), strokeWidth: 2)),
+        child: Center(child: CircularProgressIndicator(color: _accent, strokeWidth: 2)),
       );
     }
 
@@ -833,7 +851,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text("RECENT", style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFF94A3B8), letterSpacing: 1.0)),
-            Text("See all", style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFF2C95F1))),
+            Text("See all", style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: _accent)),
           ],
         ),
         const SizedBox(height: 16),
@@ -859,10 +877,10 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2C95F1).withOpacity(0.1),
+                      color: _accent.withOpacity(0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.history_rounded, color: Color(0xFF2C95F1), size: 20),
+                    child: Icon(Icons.history_rounded, color: _accent, size: 20),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -910,12 +928,12 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
             leading: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFF2C95F1).withOpacity(0.1),
+                color: _accent.withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.location_on_rounded,
-                color: Color(0xFF2C95F1),
+                color: _accent,
                 size: 20,
               ),
             ),
@@ -934,7 +952,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                     margin: const EdgeInsets.only(top: 6),
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2C95F1).withOpacity(0.08),
+                      color: _accent.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -942,7 +960,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                       style: GoogleFonts.poppins(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: const Color(0xFF2C95F1),
+                        color: _accent,
                       ),
                     ),
                   ),

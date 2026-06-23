@@ -63,37 +63,37 @@ const _kVehicles = [
     key: 'bike_parcel', name: 'Bike Parcel', subtitle: 'Fast & lightweight',
     icon: 'bike', capacity: 'Up to 10 kg', maxKg: 10,
     suitable: 'Documents · Small boxes · Groceries · Medicine',
-    accentColor: JT.parcelGreen,
+    accentColor: JT.parcelGold,
   ),
   _ParcelVehicle(
     key: 'auto_parcel', name: 'Auto Parcel', subtitle: 'Goods carrier auto',
     icon: 'auto_parcel', capacity: 'Up to 50 kg', maxKg: 50,
     suitable: 'Medium boxes - Shop supplies - Small furniture',
-    accentColor: JT.parcelGreenDark,
+    accentColor: JT.parcelGoldDark,
   ),
   _ParcelVehicle(
     key: 'tata_ace', name: 'Mini Truck', subtitle: 'Tata Ace · Medium goods',
     icon: 'mini_truck', capacity: 'Up to 500 kg', maxKg: 500,
     suitable: 'Furniture · Appliances · Bulk items · Shop stock',
-    accentColor: Color(0xFF047857),
+    accentColor: JT.parcelGoldDark,
   ),
   _ParcelVehicle(
     key: 'pickup_truck', name: 'Pickup Truck', subtitle: 'Heavy goods & business',
     icon: 'pickup_truck', capacity: 'Up to 2,000 kg', maxKg: 2000,
     suitable: 'Heavy machinery · Construction · Business logistics',
-    accentColor: Color(0xFF065F46),
+    accentColor: JT.parcelGoldDark,
   ),
   _ParcelVehicle(
     key: 'bolero_cargo', name: 'Bolero Pickup', subtitle: 'Heavy-duty pickup',
     icon: 'bolero_cargo', capacity: 'Up to 1,500 kg', maxKg: 1500,
     suitable: 'Construction - Heavy equipment - Large shipments',
-    accentColor: JT.parcelGreenLight,
+    accentColor: JT.parcelGoldLight,
   ),
   _ParcelVehicle(
     key: 'tempo_407', name: 'Tata 407 / Tempo', subtitle: 'Large commercial tempo',
     icon: 'tempo_407', capacity: 'Up to 2,500 kg', maxKg: 2500,
     suitable: 'Factory goods - Large loads - Full shifting',
-    accentColor: JT.parcelGreenDark,
+    accentColor: JT.parcelGoldDark,
   ),
 ];
 
@@ -222,8 +222,8 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
             .where((v) => _isParcelVehicle(v as Map<String, dynamic>))
             .map<_ParcelVehicle>((v) {
           final m = v as Map<String, dynamic>;
-          final colorStr = m['color']?.toString() ?? m['accentColor']?.toString() ?? m['accent_color']?.toString() ?? '#16A34A';
-          final colorVal = int.tryParse(colorStr.replaceFirst('#', '0xFF')) ?? 0xFF16A34A;
+          final colorStr = m['color']?.toString() ?? m['accentColor']?.toString() ?? m['accent_color']?.toString() ?? '#C29763';
+          final colorVal = int.tryParse(colorStr.replaceFirst('#', '0xFF')) ?? 0xFFC29763;
           final key = m['vehicle_key']?.toString() ?? m['vehicleKey']?.toString() ?? m['key']?.toString() ?? '';
           final capacityLabel = m['capacity_label']?.toString() ?? m['capacityLabel']?.toString();
           final maxKg = (m['max_weight_kg'] as num?)?.toInt() ?? (m['maxWeightKg'] as num?)?.toInt() ?? 10;
@@ -696,7 +696,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
       width: double.infinity,
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [JT.primary, JT.primaryDark],
+          colors: [JT.parcelGold, JT.parcelGoldDark],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -783,9 +783,9 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                       height: 32,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: isActive || isCompleted ? JT.primary : Colors.white,
+                        color: isActive || isCompleted ? JT.parcelGold : Colors.white,
                         border: Border.all(
-                          color: isActive || isCompleted ? JT.primary : const Color(0xFFE5E7EB),
+                          color: isActive || isCompleted ? JT.parcelGold : const Color(0xFFE5E7EB),
                           width: 1.5,
                         ),
                       ),
@@ -808,7 +808,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                       style: GoogleFonts.poppins(
                         fontSize: 11,
                         fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                        color: isActive ? JT.primary : const Color(0xFF9CA3AF),
+                        color: isActive ? JT.parcelGold : const Color(0xFF9CA3AF),
                       ),
                     ),
                   ],
@@ -818,7 +818,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                     child: Container(
                       height: 1,
                       margin: const EdgeInsets.only(bottom: 22, left: 8, right: 8),
-                      color: isCompleted ? JT.primary : const Color(0xFFE5E7EB),
+                      color: isCompleted ? JT.parcelGold : const Color(0xFFE5E7EB),
                     ),
                   ),
               ],
@@ -869,14 +869,14 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                 margin: const EdgeInsets.only(bottom: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: isSelected ? JT.primary.withValues(alpha: 0.03) : Colors.white,
+                  color: isSelected ? JT.parcelGold.withValues(alpha: 0.03) : Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isSelected ? JT.primary : const Color(0xFFE5E7EB).withValues(alpha: 0.8),
+                    color: isSelected ? JT.parcelGold : const Color(0xFFE5E7EB).withValues(alpha: 0.8),
                     width: isSelected ? 1.5 : 1,
                   ),
                   boxShadow: isSelected 
-                    ? [BoxShadow(color: JT.primary.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))]
+                    ? [BoxShadow(color: JT.parcelGold.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))]
                     : [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 4, offset: const Offset(0, 2))],
                 ),
                 child: Row(
@@ -981,9 +981,9 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                       margin: const EdgeInsets.only(top: 4),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: isSelected ? JT.primary : Colors.white,
+                        color: isSelected ? JT.parcelGold : Colors.white,
                         border: Border.all(
-                          color: isSelected ? JT.primary : const Color(0xFFD1D5DB),
+                          color: isSelected ? JT.parcelGold : const Color(0xFFD1D5DB),
                           width: 1.5,
                         ),
                       ),
@@ -1044,7 +1044,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: JT.primary, size: 16),
+          Icon(icon, color: JT.parcelGold, size: 16),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1095,16 +1095,16 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: JT.primaryLight, 
+                          color: JT.parcelGoldSoft, 
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: JT.primary.withValues(alpha: 0.2)),
+                          border: Border.all(color: JT.parcelGold.withValues(alpha: 0.2)),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.remove_circle_outline_rounded, size: 14, color: JT.primary),
+                            const Icon(Icons.remove_circle_outline_rounded, size: 14, color: JT.parcelGold),
                             const SizedBox(width: 6),
                             Text('Use Current', style: GoogleFonts.poppins(
-                              fontSize: 12, color: JT.primary, fontWeight: FontWeight.w600)),
+                              fontSize: 12, color: JT.parcelGold, fontWeight: FontWeight.w600)),
                           ],
                         ),
                       ),
@@ -1117,7 +1117,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                   children: [
                     Container(
                       width: 44, height: 44,
-                      decoration: const BoxDecoration(color: JT.primary, shape: BoxShape.circle),
+                      decoration: const BoxDecoration(color: JT.parcelGold, shape: BoxShape.circle),
                       child: const Icon(Icons.location_on_rounded, color: Colors.white, size: 24)),
                     const SizedBox(width: 16),
                     Expanded(
@@ -1157,7 +1157,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                               ),
                               Container(
                                 width: 32, height: 32,
-                                decoration: const BoxDecoration(color: JT.primary, shape: BoxShape.circle),
+                                decoration: const BoxDecoration(color: JT.parcelGold, shape: BoxShape.circle),
                                 child: const Icon(Icons.search, color: Colors.white, size: 16),
                               ),
                             ],
@@ -1219,9 +1219,9 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
         Container(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
           decoration: BoxDecoration(
-            color: _destLat != 0 ? JT.primary.withValues(alpha: 0.01) : Colors.white,
+            color: _destLat != 0 ? JT.parcelGold.withValues(alpha: 0.01) : Colors.white,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _destLat != 0 ? JT.primary.withValues(alpha: 0.3) : const Color(0xFFE5E7EB).withValues(alpha: 0.8)),
+            border: Border.all(color: _destLat != 0 ? JT.parcelGold.withValues(alpha: 0.3) : const Color(0xFFE5E7EB).withValues(alpha: 0.8)),
             boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))],
           ),
           child: Column(
@@ -1286,7 +1286,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                                   ),
                                   Container(
                                     width: 32, height: 32,
-                                    decoration: const BoxDecoration(color: JT.primary, shape: BoxShape.circle),
+                                    decoration: const BoxDecoration(color: JT.parcelGold, shape: BoxShape.circle),
                                     child: const Icon(Icons.search, color: Colors.white, size: 16),
                                   ),
                                 ],
@@ -1338,7 +1338,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: JT.primaryLight,
+            color: JT.parcelGoldLight,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Row(children: [
@@ -1381,7 +1381,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 18, color: JT.primary.withValues(alpha: 0.8)),
+            Icon(icon, size: 18, color: JT.parcelGold.withValues(alpha: 0.8)),
             const SizedBox(width: 8),
             Text(label, style: GoogleFonts.poppins(
               fontSize: 13, color: const Color(0xFF4B5563), fontWeight: FontWeight.w600)),
@@ -1414,9 +1414,9 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: sel ? JT.primary : Colors.white,
+                color: sel ? JT.parcelGold : Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: sel ? JT.primary : const Color(0xFFE5E7EB)),
+                border: Border.all(color: sel ? JT.parcelGold : const Color(0xFFE5E7EB)),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(_itemTypeIcon(t['icon']!), color: sel ? Colors.white : const Color(0xFF4B5563), size: 18),
@@ -1444,9 +1444,9 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: sel ? JT.primary.withValues(alpha: 0.05) : Colors.white,
+                  color: sel ? JT.parcelGold.withValues(alpha: 0.05) : Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: sel ? JT.primary : const Color(0xFFE5E7EB)),
+                  border: Border.all(color: sel ? JT.parcelGold : const Color(0xFFE5E7EB)),
                 ),
                 child: Row(children: [
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1455,7 +1455,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                     Text(opt['desc'] as String, style: GoogleFonts.poppins(
                         fontSize: 12, color: const Color(0xFF6B7280))),
                   ])),
-                  if (sel) const Icon(Icons.check_circle, color: JT.primary, size: 20),
+                  if (sel) const Icon(Icons.check_circle, color: JT.parcelGold, size: 20),
                 ]),
               ),
             ),
@@ -1472,7 +1472,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
         Row(children: [
           Checkbox(
             value: _safetyAgreed,
-            activeColor: JT.primary,
+            activeColor: JT.parcelGold,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
             onChanged: (v) => setState(() => _safetyAgreed = v ?? false)),
           Expanded(child: GestureDetector(
@@ -1520,14 +1520,14 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: JT.primary.withValues(alpha: 0.05),
+        color: JT.parcelGold.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: JT.primary.withValues(alpha: 0.2))),
+        border: Border.all(color: JT.parcelGold.withValues(alpha: 0.2))),
       child: Column(children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text('Total Bill Amount', style: GoogleFonts.poppins(fontSize: 15, color: const Color(0xFF1F2937))),
           Text('₹$total', style: GoogleFonts.poppins(
-              fontSize: 24, fontWeight: FontWeight.w700, color: JT.primary)),
+              fontSize: 24, fontWeight: FontWeight.w700, color: JT.parcelGold)),
         ]),
         const Divider(height: 24),
         _fareMiniRow('Base Fare', '₹${e['baseFare'] ?? 0}'),
@@ -1585,11 +1585,11 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
           duration: const Duration(milliseconds: 200),
           height: 60,
           decoration: BoxDecoration(
-            color: canGoNext ? JT.primary : const Color(0xFFE5E7EB),
+            color: canGoNext ? JT.parcelGold : const Color(0xFFE5E7EB),
             borderRadius: BorderRadius.circular(16),
             boxShadow: canGoNext ? [
               BoxShadow(
-                color: JT.primary.withValues(alpha: 0.3),
+                color: JT.parcelGold.withValues(alpha: 0.3),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               )
@@ -1620,18 +1620,13 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
       controller: ctrl,
       keyboardType: keyboard,
       maxLines: lines,
-      style: GoogleFonts.poppins(fontSize: 14, color: const Color(0xFF111827)),
+      style: GoogleFonts.poppins(fontSize: 14, color: JT.textPrimary),
       onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
+      decoration: JT.moduleFieldDecoration(
+        isParcel: true,
         hintText: hint,
-        hintStyle: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF9CA3AF)),
-        prefixIcon: Icon(icon, color: const Color(0xFF9CA3AF), size: 20),
-        filled: true,
-        fillColor: const Color(0xFFF9FAFB),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: JT.primary, width: 1.5)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        prefixIcon: Icon(icon, color: JT.parcelGold.withValues(alpha: 0.75), size: 20),
+        maxLines: lines,
       ),
     );
   }
@@ -1660,7 +1655,7 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg, style: const TextStyle(color: Colors.white)),
-      backgroundColor: error ? Colors.redAccent : JT.primary,
+      backgroundColor: error ? Colors.redAccent : JT.parcelGold,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ));

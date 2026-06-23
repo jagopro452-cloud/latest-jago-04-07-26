@@ -28,6 +28,11 @@ class JT {
   static const Color iconInactive  = AppColors.textTertiary;   // #9CA3AF
   static const Color error   = AppColors.error;             // #DC2626
   static const Color success = AppColors.success;           // #16A34A
+  static const Color parcelGold = AppColors.parcelGold;
+  static const Color parcelGoldLight = AppColors.parcelGoldLight;
+  static const Color parcelGoldDark = AppColors.parcelGoldDark;
+  static const Color parcelGoldSoft = AppColors.parcelGoldSoft;
+  static const LinearGradient parcelGrad = AppColors.parcelGrad;
   static const Color warning = AppColors.warning;           // #F59E0B
 
   // GRADIENTS — Same as app_theme

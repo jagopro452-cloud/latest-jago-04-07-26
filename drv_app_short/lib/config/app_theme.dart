@@ -24,6 +24,16 @@ class AppColors {
   static const error = Color(0xFFDC2626);
   static const warning = Color(0xFFF59E0B);
   static const success = Color(0xFF16A34A);
+  static const parcelGold = Color(0xFFC29763);
+  static const parcelGoldLight = Color(0xFFD6B58F);
+  static const parcelGoldDark = Color(0xFFA67C4A);
+  static const parcelGoldSoft = Color(0xFFF8F0E8);
+
+  static const LinearGradient parcelGrad = LinearGradient(
+    colors: [Color(0xFFC29763), Color(0xFFD6B58F)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
 
   // ──────────────────────────────────────────────────────────────────────────
   // TEXT HIERARCHY — Dark on Light

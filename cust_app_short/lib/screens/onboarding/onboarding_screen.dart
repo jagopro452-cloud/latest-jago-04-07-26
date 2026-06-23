@@ -30,8 +30,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> with TickerProvider
     ),
     _Slide(
       icon: Icons.inventory_2_rounded,
-      iconBg: Color(0xFF2C95F1),
-      gradient: [Color(0xFF150A28), Color(0xFF1565C0)],
+      iconBg: Color(0xFFC29763),
+      gradient: [Color(0xFF2A1F14), Color(0xFF4A3520)],
       label: 'DELIVERY',
       title: 'Send Parcels\nDoor to Door',
       subtitle: 'Same-day delivery with live tracking. Documents, packages, anything.',

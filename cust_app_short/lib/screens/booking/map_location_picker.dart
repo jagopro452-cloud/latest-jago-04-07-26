@@ -43,11 +43,15 @@ class MapLocationPicker extends StatefulWidget {
   final double? initialLat;
   final double? initialLng;
 
+  /// Module accent for buttons, focus rings, and map chrome.
+  final Color? accentColor;
+
   const MapLocationPicker({
     super.key,
     this.title = 'Select Location',
     this.initialLat,
     this.initialLng,
+    this.accentColor,
   });
 
   @override
@@ -57,6 +61,8 @@ class MapLocationPicker extends StatefulWidget {
 class _MapLocationPickerState extends State<MapLocationPicker> {
   GoogleMapController? _mapController;
   LatLng? _pendingCamera; // camera move queued before map ready
+
+  Color get _accent => widget.accentColor ?? JT.primary;
 
   // Current center of the map (source of truth)
   // null until GPS is confirmed — avoids biasing search toward a hardcoded city
@@ -564,7 +570,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                           style: GoogleFonts.poppins(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                       ),
-                      const Icon(Icons.location_on, size: 48, color: JT.primary),
+                      Icon(Icons.location_on, size: 48, color: _accent),
                       // Small dot representing the exact coordinate
                       Container(
                         width: 8, height: 4,
@@ -620,11 +626,11 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
               backgroundColor: Colors.white,
               onPressed: _onMyLocationTap,
               child: _locationLoading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: JT.primary),
-                    )
-                  : const Icon(Icons.my_location, color: JT.primary, size: 22),
+                      child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
+                  )
+                  : Icon(Icons.my_location, color: _accent, size: 22),
             ),
           ),
         ],
@@ -655,7 +661,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.search_rounded, color: JT.primary),
+            icon: Icon(Icons.search_rounded, color: _accent),
             onPressed: () {
               setState(() => _showSearch = true);
               Future.delayed(const Duration(milliseconds: 100), () => _searchFocus.requestFocus());
@@ -714,9 +720,9 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
               },
             ),
           if (_searching)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(right: 14),
-              child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: JT.primary)),
+              child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
             ),
         ],
       ),
@@ -742,10 +748,10 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
             leading: Container(
               width: 36, height: 36,
               decoration: BoxDecoration(
-                color: JT.primary.withValues(alpha: 0.1),
+                color: _accent.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.location_on_outlined, color: JT.primary, size: 20),
+              child: Icon(Icons.location_on_outlined, color: _accent, size: 20),
             ),
             title: Text(
               pred.mainText,
@@ -795,10 +801,10 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
               Container(
                 width: 40, height: 40,
                 decoration: BoxDecoration(
-                  color: JT.primary.withValues(alpha: 0.1),
+                  color: _accent.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.location_on_rounded, color: JT.primary, size: 22),
+                child: Icon(Icons.location_on_rounded, color: _accent, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -812,9 +818,9 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                     const SizedBox(height: 2),
                     _geocoding
                         ? Row(children: [
-                            const SizedBox(
+                            SizedBox(
                               width: 14, height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: JT.primary),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
                             ),
                             const SizedBox(width: 8),
                             Text('Getting address...', style: GoogleFonts.poppins(fontSize: 13, color: JT.textSecondary)),
@@ -830,7 +836,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: _serviceable
-                            ? JT.primary.withValues(alpha: 0.1)
+                            ? _accent.withValues(alpha: 0.1)
                             : const Color(0xFFF43F5E).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(999),
                       ),
@@ -843,7 +849,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                         style: GoogleFonts.poppins(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: _serviceable ? JT.primary : const Color(0xFFBE123C),
+                          color: _serviceable ? _accent : const Color(0xFFBE123C),
                         ),
                       ),
                     ),
