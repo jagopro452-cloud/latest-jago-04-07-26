@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../config/jago_theme.dart';
 import '../main_screen.dart';
 import 'dart:convert';
-import '../tracking/tracking_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../chat/trip_chat_sheet.dart';
 import 'package:http/http.dart' as http;
@@ -272,7 +271,7 @@ class _TripCompletionScreenState extends State<TripCompletionScreen> {
     );
   }
 
-  Widget _headerAction(IconData icon, {int? targetIndex}) {
+  Widget _headerAction(IconData icon) {
     return GestureDetector(
       onTap: () {
         Navigator.pushAndRemoveUntil(
