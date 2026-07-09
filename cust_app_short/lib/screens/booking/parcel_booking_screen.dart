@@ -1323,8 +1323,8 @@ class _ParcelBookingScreenState extends State<ParcelBookingScreen>
                   color: Colors.white, shape: BoxShape.circle),
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
-                child: Image.network(
-                  'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_49_26_AM_gjbrxs',
+                child: Image.asset(
+                  'assets/vehicles_3d/parcel_bike.png',
                   width: 36, height: 36, fit: BoxFit.contain,
                 ),
               )),

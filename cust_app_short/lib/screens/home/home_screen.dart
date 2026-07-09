@@ -1396,8 +1396,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 // New brand image on the left
                                 Positioned(
                                   bottom: -8, left: -8,
-                                  child: Image.network(
-                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775370325/04bcf87d-433e-4508-b475-78eaee34ff98_qxbn2c.png',
+                                  child: Image.asset(
+                                    'assets/vehicles_3d/sedan.png',
                                     height: 85,
                                     fit: BoxFit.contain,
                                     errorBuilder: (_, __, ___) => const SizedBox.shrink(),
@@ -1408,7 +1408,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   bottom: 10, right: 10,
                                   child: VehicleArtwork(
                                     vehicleKey: 'sedan',
-                                    networkUrl: 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775129355/ChatGPT_Image_Apr_2_2026_04_59_00_PM_rlsvjz.png',
                                     height: 80,
                                   ),
                                 ),
@@ -1448,8 +1447,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 // Delivery image on the left side
                                 Positioned(
                                   bottom: -8, left: -8,
-                                  child: Image.network(
-                                    'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775367404/be5b86c2-7a8a-4dbd-ad33-e8da2b627d5e_vurdrg.png',
+                                  child: Image.asset(
+                                    'assets/vehicles_3d/delivery.png',
                                     height: 85,
                                     fit: BoxFit.contain,
                                     errorBuilder: (_, __, ___) => const SizedBox.shrink(),
@@ -1460,7 +1459,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   bottom: 10, right: 10,
                                   child: VehicleArtwork(
                                     vehicleKey: 'parcel',
-                                    networkUrl: 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775128882/ChatGPT_Image_Apr_2_2026_04_47_08_PM_zg8llx.png',
                                     height: 75,
                                   ),
                                 ),

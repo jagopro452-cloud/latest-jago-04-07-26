@@ -47,32 +47,15 @@ class VehicleArtwork extends StatelessWidget {
     'carpool': 'assets/vehicles_3d/carpool.png',
     'outstation': 'assets/vehicles_3d/outstation.png',
     'delivery': 'assets/vehicles_3d/delivery.png',
+    // Pool variants map to closest 3D equivalent
+    'pool_bike': 'assets/vehicles_3d/bike.png',
+    'pool_auto': 'assets/vehicles_3d/auto.png',
+    'pool_mini': 'assets/vehicles_3d/cab.png',
+    'pool_sedan': 'assets/vehicles_3d/sedan.png',
+    'pool_suv': 'assets/vehicles_3d/suv.png',
   };
 
-  /// PRIORITY 2: Network PNG artwork (CDN fallback + admin icons).
-  static const Map<String, String> pngByKey = {
-    'bike': 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775123974/bike_logo_g7idrq.png',
-    'auto': 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775125550/ChatGPT_Image_Apr_2_2026_03_55_30_PM_ywb7fj.png',
-    'cab': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_27_28_AM_w0rcnh',
-    'mini_car': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_27_28_AM_w0rcnh',
-    'sedan': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038163/ChatGPT_Image_May_29_2026_12_31_37_PM_ys5bjt.png',
-    'suv': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038163/ChatGPT_Image_May_29_2026_12_31_37_PM_ys5bjt.png',
-    'premium': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_31_05_AM_kavp5e',
-    'parcel': 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775126915/ChatGPT_Image_Apr_2_2026_04_18_17_PM_g83nv8.png',
-    'parcel_bike': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_49_26_AM_gjbrxs',
-    'parcel_auto': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_49_26_AM_gjbrxs',
-    'mini_truck': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_51_59_AM_jzd119',
-    'tata_ace': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_51_59_AM_jzd119',
-    'pickup_van': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_54_02_AM_hicx7s',
-    'pickup_truck': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_54_02_AM_hicx7s',
-    'bolero': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_54_02_AM_hicx7s',
-    'tempo_407': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_54_02_AM_hicx7s',
-    'carpool': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038580/ChatGPT_Image_May_29_2026_12_39_20_PM_s8j1bs.png',
-    'outstation': 'https://res.cloudinary.com/dg5ct7fys/image/upload/v1780038697/ChatGPT_Image_May_29_2026_12_41_11_PM_xoynqv.png',
-    'delivery': 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775367404/be5b86c2-7a8a-4dbd-ad33-e8da2b627d5e_vurdrg.png',
-  };
-
-  /// PRIORITY 3: Local SVG fallback (emergency only, network failure).
+  /// PRIORITY 2 (emergency): Local SVG fallback for unknown keys.
   static const Map<String, String> _assets = {
     'bike': 'assets/vehicles/bike.svg',
     'auto': 'assets/vehicles/auto.svg',
@@ -124,21 +107,19 @@ class VehicleArtwork extends StatelessWidget {
     return n.replaceAll(' ', '_');
   }
 
-  /// Resolve display URL: explicit networkUrl → admin icon → canonical PNG.
+  /// Resolve display URL: admin icon only (local 3D PNGs handle all known vehicles).
+  /// Explicit networkUrl and CDN fallback are intentionally not used — all vehicle
+  /// types have bundled 3D assets, avoiding network dependency for vehicle images.
   static String? resolveDisplayUrl({
     required String nameOrKey,
     String? adminIcon,
     String? networkUrl,
   }) {
-    final explicit = networkUrl?.trim();
-    if (explicit != null && explicit.isNotEmpty) return explicit;
-
     final icon = adminIcon?.trim() ?? '';
     if (icon.startsWith('http://') || icon.startsWith('https://')) return icon;
     if (icon.startsWith('/')) return '${ApiConfig.baseUrl}$icon';
 
-    final key = normalizeKey(nameOrKey);
-    return pngByKey[key];
+    return null;
   }
 
   static String? assetPathFor(String raw) {
