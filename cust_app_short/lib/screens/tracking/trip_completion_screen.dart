@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import '../../services/auth_service.dart';
 import '../../config/api_config.dart';
 import 'package:flutter/services.dart';
+import '../tip/tip_driver_screen.dart';
 
 class TripCompletionScreen extends StatefulWidget {
   final Map<String, dynamic> trip;
@@ -215,7 +216,34 @@ class _TripCompletionScreenState extends State<TripCompletionScreen> {
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 24),
+                            const SizedBox(height: 16),
+
+                            // Tip Driver button (shown after rating)
+                            if (_isRatingSubmitted && !widget.isParcel)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    final tripId = widget.trip['id']?.toString() ?? '';
+                                    final driverName = widget.trip['driverName']?.toString() ??
+                                        widget.trip['driver_name']?.toString() ?? 'Pilot';
+                                    if (tripId.isNotEmpty) {
+                                      Navigator.push(context, MaterialPageRoute(
+                                        builder: (_) => TipDriverScreen(tripId: tripId, driverName: driverName),
+                                      ));
+                                    }
+                                  },
+                                  icon: const Icon(Icons.volunteer_activism_rounded),
+                                  label: const Text('Add a Tip'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: JT.primary,
+                                    side: BorderSide(color: JT.primary),
+                                    minimumSize: const Size(double.infinity, 48),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 8),
 
                             // Finished Button
                             JT.gradientButton(

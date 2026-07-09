@@ -36,6 +36,7 @@ import '../auth/login_screen.dart';
 import '../b2b/b2b_login_screen.dart';
 import '../outstation_pool/outstation_pool_screen.dart';
 import '../car_sharing/car_sharing_screen.dart';
+import '../coins/coins_screen.dart';
 import 'modern_components.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -3446,6 +3447,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Navigator.pop(context);
             Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const OffersScreen()));
+          }),
+          _drawerItem(Icons.monetization_on_rounded, 'Jago Coins', textColor, () {
+            Navigator.pop(context);
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CoinsScreen()));
           }),
           _drawerItem(Icons.bookmark_rounded, 'Saved Places', textColor, () {
             Navigator.pop(context);

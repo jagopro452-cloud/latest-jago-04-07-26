@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
 import '../../services/auth_service.dart';
+import 'spin_wheel_screen.dart';
 
 class CoinsScreen extends StatefulWidget {
   const CoinsScreen({super.key});
@@ -143,6 +144,33 @@ class _CoinsScreenState extends State<CoinsScreen> {
                     ),
                     SizedBox(height: JT.spacing16),
                   ],
+                  // Spin the wheel banner
+                  GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SpinWheelScreen()))
+                        .then((_) => _load()),
+                    child: Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.all(JT.spacing16),
+                      decoration: BoxDecoration(
+                        color: JT.warning.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(JT.radiusLg),
+                        border: Border.all(color: JT.warning.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(children: [
+                        const Text('🎡', style: TextStyle(fontSize: 32)),
+                        SizedBox(width: JT.spacing12),
+                        Expanded(child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Spin & Win!', style: JT.h5.copyWith(color: JT.warning)),
+                            Text('Spin the wheel once daily to earn bonus coins', style: JT.smallText),
+                          ],
+                        )),
+                        Icon(Icons.arrow_forward_ios_rounded, color: JT.warning, size: 16),
+                      ]),
+                    ),
+                  ),
+                  SizedBox(height: JT.spacing16),
                   // How it works
                   Container(
                     padding: EdgeInsets.all(JT.spacing16),
