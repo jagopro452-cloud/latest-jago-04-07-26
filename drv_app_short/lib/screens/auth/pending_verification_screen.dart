@@ -8,6 +8,7 @@ import '../../services/auth_service.dart';
 import 'register_screen.dart';
 import '../home/home_screen.dart';
 import 'login_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class PendingVerificationScreen extends StatefulWidget {
   const PendingVerificationScreen({super.key});
@@ -40,7 +41,7 @@ class _PendingVerificationScreenState extends State<PendingVerificationScreen> {
       final res = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/app/driver/verification-status'),
         headers: headers,
-      );
+      ).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) {
@@ -83,24 +84,24 @@ class _PendingVerificationScreenState extends State<PendingVerificationScreen> {
       body: _loading
         ? Center(child: CircularProgressIndicator(color: JT.primary))
         : SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
             child: Column(
               children: [
-                const SizedBox(height: 20),
-                Center(child: JT.logoBlue(height: 60)),
-                const SizedBox(height: 32),
+                const SizedBox(height: 8),
+                Center(child: JT.brandBadge(logoHeight: 26, padding: 12, radius: 20)),
+                const SizedBox(height: 24),
                 Text(
                   status == 'approved' ? 'Account Approved!' : (status == 'rejected' ? 'Verification Rejected' : 'Account Under Review'),
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w500, color: JT.textPrimary),
+                  style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.w600, color: JT.textPrimary),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Hello $name, your account is currently being verified by our team.',
-                  style: TextStyle(color: JT.textSecondary),
+                  style: GoogleFonts.poppins(color: JT.textSecondary, fontSize: 13, height: 1.5),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
                 if (status == 'approved')
                   _buildStatusBanner(
                     'Your account has been approved. You can now start earning!',
@@ -118,7 +119,7 @@ class _PendingVerificationScreenState extends State<PendingVerificationScreen> {
                 const SizedBox(height: 32),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('Document Status', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: JT.textPrimary)),
+                  child: Text('Document Status', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: JT.textPrimary)),
                 ),
                 const SizedBox(height: 16),
                 ...docs.map((doc) => _buildDocTile(doc)).toList(),
@@ -132,13 +133,17 @@ class _PendingVerificationScreenState extends State<PendingVerificationScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(
         children: [
-          Text(message, style: TextStyle(color: color, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
+          Text(
+            message,
+            style: GoogleFonts.poppins(color: color, fontWeight: FontWeight.w600, fontSize: 14, height: 1.45),
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -175,17 +180,26 @@ class _PendingVerificationScreenState extends State<PendingVerificationScreen> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(color: JT.surfaceAlt, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: JT.surfaceAlt,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: JT.border),
+      ),
       child: ListTile(
         leading: Icon(Icons.description, color: statusColor),
-        title: Text(labels[type] ?? type, style: TextStyle(color: JT.textPrimary, fontWeight: FontWeight.w400)),
-        subtitle: note != null ? Text(note, style: TextStyle(color: Colors.red.shade300, fontSize: 12)) : null,
+        title: Text(
+          labels[type] ?? type,
+          style: GoogleFonts.poppins(color: JT.textPrimary, fontWeight: FontWeight.w500, fontSize: 14),
+        ),
+        subtitle: note != null
+            ? Text(note, style: GoogleFonts.poppins(color: Colors.red.shade300, fontSize: 12, height: 1.4))
+            : null,
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
           child: Text(
             status.toString().toUpperCase(),
-            style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w500),
+            style: GoogleFonts.poppins(color: statusColor, fontSize: 10, fontWeight: FontWeight.w600),
           ),
         ),
       ),

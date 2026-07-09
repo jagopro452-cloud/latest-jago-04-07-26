@@ -37,7 +37,7 @@ class _LostFoundScreenState extends State<LostFoundScreen> {
     setState(() => _loading = true);
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/customer/lost-found'), headers: headers).timeout(const Duration(seconds: 8));
+      final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/customer/lost-found'), headers: headers);
       if (res.statusCode == 200 && mounted) setState(() => _reports = jsonDecode(res.body));
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
@@ -56,7 +56,7 @@ class _LostFoundScreenState extends State<LostFoundScreen> {
           'description': _descCtrl.text.trim(),
           'contactPhone': _phoneCtrl.text.trim(),
         }),
-      ).timeout(const Duration(seconds: 10));
+      );
       if (!mounted) return;
       final body = jsonDecode(res.body);
       final messenger = ScaffoldMessenger.of(context);

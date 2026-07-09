@@ -2,8 +2,8 @@ class ApiConfig {
   // Override at compile time:  --dart-define=API_BASE_URL=https://yourdomain.com
   static const String compileTimeBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
 
-  // Production EC2 server (ap-south-1)
-  static const String _prodUrl = 'http://15.207.65.184:5000';
+  // Production — HTTPS via jagopro.org
+  static const String _prodUrl = 'https://jagopro.org';
 
   static String get baseUrl {
     if (compileTimeBaseUrl.isNotEmpty) {
@@ -13,11 +13,17 @@ class ApiConfig {
     return _prodUrl;
   }
 
-  // MUST be supplied at build time:
-  //   flutter build apk --dart-define=GOOGLE_MAPS_KEY=AIzaSy...
-  // Never commit a real key as the defaultValue.
-  static const String googleMapsApiKey =
-      String.fromEnvironment('GOOGLE_MAPS_KEY', defaultValue: '');
+  static String? _runtimeMapsAndroidKey;
+  static const String googleMapsAndroidKeyEnv = String.fromEnvironment('GOOGLE_MAPS_ANDROID_KEY', defaultValue: '');
+  static String get googleMapsAndroidKey {
+    if (googleMapsAndroidKeyEnv.isNotEmpty) return googleMapsAndroidKeyEnv;
+    return _runtimeMapsAndroidKey ?? '';
+  }
+  static void setRuntimeMapsAndroidKey(String? key) {
+    final k = key?.trim() ?? '';
+    if (k.isNotEmpty) _runtimeMapsAndroidKey = k;
+  }
+  static const String googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_KEY', defaultValue: '');
 
   // Socket.IO base URL (same server, no path)
   static String get socketUrl => baseUrl;

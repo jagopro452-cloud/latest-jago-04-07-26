@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../../widgets/jago_map_markers.dart';
 import 'package:http/http.dart' as http;
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
@@ -43,15 +44,11 @@ class MapLocationPicker extends StatefulWidget {
   final double? initialLat;
   final double? initialLng;
 
-  /// Module accent for buttons, focus rings, and map chrome.
-  final Color? accentColor;
-
   const MapLocationPicker({
     super.key,
     this.title = 'Select Location',
     this.initialLat,
     this.initialLng,
-    this.accentColor,
   });
 
   @override
@@ -59,10 +56,8 @@ class MapLocationPicker extends StatefulWidget {
 }
 
 class _MapLocationPickerState extends State<MapLocationPicker> {
-  GoogleMapController? _mapController;
+  final JagoMapController _mapController = JagoMapController();
   LatLng? _pendingCamera; // camera move queued before map ready
-
-  Color get _accent => widget.accentColor ?? JT.primary;
 
   // Current center of the map (source of truth)
   // null until GPS is confirmed — avoids biasing search toward a hardcoded city
@@ -73,7 +68,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
   String _address = 'Move the map to select location';
   bool _geocoding = false;
   bool _locationLoading = true;
-  bool _serviceable = false;
+  bool _serviceable = true;
   String? _zoneName;
 
   // Search state
@@ -108,7 +103,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
         if (addr.isNotEmpty) {
           setState(() {
             _address = addr;
-            _serviceable = data['serviceable'] == true;
+            _serviceable = data['serviceable'] != false;
             _zoneName = data['zoneName']?.toString();
             _geocoding = false;
           });
@@ -145,12 +140,18 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
   @override
   void initState() {
     super.initState();
-    if (widget.initialLat != null && widget.initialLng != null) {
+    if (widget.initialLat != null && widget.initialLng != null &&
+        widget.initialLat != 0 && widget.initialLng != 0) {
       _lat = widget.initialLat!;
       _lng = widget.initialLng!;
       _locationLoading = false;
       _reverseGeocode(_lat!, _lng!);
     } else {
+      // Show map immediately on all devices (Oppo/slow GPS must not block tiles).
+      _lat = 16.5062;
+      _lng = 80.6480;
+      _locationLoading = false;
+      _address = 'Move the map to select location';
       _getCurrentLocation();
     }
   }
@@ -160,7 +161,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
     _searchCtrl.dispose();
     _searchFocus.dispose();
     _debounce?.cancel();
-    _mapController?.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -182,8 +183,8 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
             _address = 'Using last known location';
           });
           final target = LatLng(_lat!, _lng!);
-          if (_mapController != null) {
-            _mapController!.animateCamera(CameraUpdate.newLatLngZoom(target, 14));
+          if (!_locationLoading) {
+            _mapController.moveZoom(target, 14);
           } else {
             _pendingCamera = target;
           }
@@ -232,8 +233,8 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
           _gpsLng = lastPos.longitude;
         });
         final target = LatLng(_lat!, _lng!);
-        if (_mapController != null) {
-          _mapController!.animateCamera(CameraUpdate.newLatLngZoom(target, 14));
+        if (!_locationLoading) {
+          _mapController.moveZoom(target, 14);
         } else {
           _pendingCamera = target;
         }
@@ -242,8 +243,8 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
 
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 10),
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 8),
         ),
       );
       if (!mounted) return;
@@ -256,14 +257,23 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
         _address = 'Current location';
       });
       final target = LatLng(_lat!, _lng!);
-      if (_mapController != null) {
-        _mapController!.animateCamera(CameraUpdate.newLatLngZoom(target, 14));
+      if (!_locationLoading) {
+        _mapController.moveZoom(target, 14);
       } else {
         _pendingCamera = target;
       }
       _reverseGeocode(_lat, _lng);
     } catch (e) {
-      setState(() => _locationLoading = false);
+      if (mounted) {
+        setState(() {
+          _locationLoading = false;
+          _lat ??= 16.5062;
+          _lng ??= 80.6480;
+          if (_address == 'Move the map to select location') {
+            _address = 'Could not detect GPS. Move map to your area.';
+          }
+        });
+      }
     }
   }
 
@@ -416,11 +426,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
           _geocoding = false;
         });
         final target = LatLng(_lat!, _lng!);
-        if (_mapController != null) {
-          _mapController!.animateCamera(CameraUpdate.newLatLngZoom(target, 16));
-        } else {
-          _pendingCamera = target;
-        }
+        _mapController.moveZoom(target, 16);
       }
       return;
     }
@@ -457,9 +463,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
             _zoneName = data['zoneName']?.toString();
             _geocoding = false;
           });
-          _mapController?.animateCamera(
-            CameraUpdate.newLatLngZoom(LatLng(newLat, newLng), 16),
-          );
+          _mapController.moveZoom(LatLng(newLat, newLng), 16);
           return;
         }
       }
@@ -515,32 +519,29 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
         children: [
           // ── Google Map ────────────────────────────────────────────────
           if (!_locationLoading && _lat != null && _lng != null)
-            GoogleMap(
+            Positioned.fill(
+              child: JagoMapView(
+              controller: _mapController,
               initialCameraPosition: CameraPosition(
                 target: LatLng(_lat!, _lng!),
                 zoom: 15,
               ),
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
               padding: const EdgeInsets.only(bottom: 240),
-              onMapCreated: (controller) {
-                _mapController = controller;
+              onMapCreated: (_) {
                 if (_pendingCamera != null) {
-                  _mapController!.animateCamera(CameraUpdate.newLatLngZoom(_pendingCamera!, 15));
+                  _mapController.moveZoom(_pendingCamera!, 15);
                   _pendingCamera = null;
                 }
               },
-            onCameraMove: (pos) {
-              // High performance: update values without setState
-              _lat = pos.target.latitude;
-              _lng = pos.target.longitude;
-            },
-            onCameraIdle: () {
-              // Only update UI and geocode when map stops moving
-              if (mounted) setState(() {});
-              _reverseGeocode(_lat, _lng);
-            },
+              onCameraMove: (pos) {
+                _lat = pos.target.latitude;
+                _lng = pos.target.longitude;
+              },
+              onCameraIdle: () {
+                if (mounted) setState(() {});
+                _reverseGeocode(_lat, _lng);
+              },
+            ),
             ),
           if (_locationLoading)
             const Center(child: CircularProgressIndicator()),
@@ -570,7 +571,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                           style: GoogleFonts.poppins(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                       ),
-                      Icon(Icons.location_on, size: 48, color: _accent),
+                      const Icon(Icons.location_on, size: 48, color: JT.primary),
                       // Small dot representing the exact coordinate
                       Container(
                         width: 8, height: 4,
@@ -626,11 +627,11 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
               backgroundColor: Colors.white,
               onPressed: _onMyLocationTap,
               child: _locationLoading
-                  ? SizedBox(
+                  ? const SizedBox(
                       width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
-                  )
-                  : Icon(Icons.my_location, color: _accent, size: 22),
+                      child: CircularProgressIndicator(strokeWidth: 2, color: JT.primary),
+                    )
+                  : const Icon(Icons.my_location, color: JT.primary, size: 22),
             ),
           ),
         ],
@@ -661,7 +662,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
             ),
           ),
           IconButton(
-            icon: Icon(Icons.search_rounded, color: _accent),
+            icon: const Icon(Icons.search_rounded, color: JT.primary),
             onPressed: () {
               setState(() => _showSearch = true);
               Future.delayed(const Duration(milliseconds: 100), () => _searchFocus.requestFocus());
@@ -720,9 +721,9 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
               },
             ),
           if (_searching)
-            Padding(
+            const Padding(
               padding: EdgeInsets.only(right: 14),
-              child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
+              child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: JT.primary)),
             ),
         ],
       ),
@@ -748,10 +749,10 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
             leading: Container(
               width: 36, height: 36,
               decoration: BoxDecoration(
-                color: _accent.withValues(alpha: 0.1),
+                color: JT.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(Icons.location_on_outlined, color: _accent, size: 20),
+              child: const Icon(Icons.location_on_outlined, color: JT.primary, size: 20),
             ),
             title: Text(
               pred.mainText,
@@ -801,10 +802,10 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
               Container(
                 width: 40, height: 40,
                 decoration: BoxDecoration(
-                  color: _accent.withValues(alpha: 0.1),
+                  color: JT.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(Icons.location_on_rounded, color: _accent, size: 22),
+                child: const Icon(Icons.location_on_rounded, color: JT.primary, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -818,9 +819,9 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                     const SizedBox(height: 2),
                     _geocoding
                         ? Row(children: [
-                            SizedBox(
+                            const SizedBox(
                               width: 14, height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: JT.primary),
                             ),
                             const SizedBox(width: 8),
                             Text('Getting address...', style: GoogleFonts.poppins(fontSize: 13, color: JT.textSecondary)),
@@ -836,7 +837,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: _serviceable
-                            ? _accent.withValues(alpha: 0.1)
+                            ? JT.primary.withValues(alpha: 0.1)
                             : const Color(0xFFF43F5E).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(999),
                       ),
@@ -849,7 +850,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                         style: GoogleFonts.poppins(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: _serviceable ? _accent : const Color(0xFFBE123C),
+                          color: _serviceable ? JT.primary : const Color(0xFFBE123C),
                         ),
                       ),
                     ),

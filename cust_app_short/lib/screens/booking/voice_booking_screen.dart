@@ -9,6 +9,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
+import '../tracking/tracking_screen.dart';
 import '../../services/auth_service.dart';
 import 'parcel_booking_screen.dart';
 import 'intercity_booking_screen.dart';
@@ -511,7 +512,7 @@ class _VoiceBookingScreenState extends State<VoiceBookingScreen>
           'destinationLat': intent['destLat'],
           'destinationLng': intent['destLng'],
         }),
-      ).timeout(const Duration(seconds: 15));
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final fares = (data['fares'] as List?)?.cast<Map<String, dynamic>>() ?? [];
@@ -615,8 +616,19 @@ class _VoiceBookingScreenState extends State<VoiceBookingScreen>
       );
       if (res.statusCode == 200) {
         HapticFeedback.heavyImpact();
+        final data = jsonDecode(res.body);
+        final tripId = data['trip']?['id']?.toString() ?? '';
         await _speak('Your ride is booked! A driver is being assigned. Have a safe trip!');
-        if (mounted) Navigator.of(context).pop(true);
+        if (!mounted) return;
+        if (tripId.isNotEmpty) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => TrackingScreen(tripId: tripId)),
+          );
+        } else {
+          _showSnack('Booking could not be confirmed. No trip ID received — please try again or book from the ride screen.');
+          await _speak('Booking could not be confirmed. Please try again.');
+        }
       } else {
         final err = jsonDecode(res.body);
         final msg = err['message'] ?? 'Booking failed';
@@ -832,7 +844,7 @@ class _VoiceBookingScreenState extends State<VoiceBookingScreen>
     final isParcel = _detectedService == 'parcel';
     final isIntercity = _detectedService == 'intercity';
     final label = isParcel ? '📦 Parcel Booking' : isIntercity ? '🛣️ Intercity Trip' : '🚗 Ride Booking';
-    final color = isParcel ? JT.parcelGold : isIntercity ? JT.success : JT.primary;
+    final color = isParcel ? JT.warning : isIntercity ? JT.success : JT.primary;
     return Center(child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(

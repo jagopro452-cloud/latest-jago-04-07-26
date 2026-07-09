@@ -9,6 +9,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../../widgets/jago_map_markers.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -65,7 +66,7 @@ class _TripScreenState extends State<TripScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   final SocketService _socket = SocketService();
   final FlutterTts _tts = FlutterTts();
-  GoogleMapController? _mapController;
+  final JagoMapController _mapController = JagoMapController();
   LatLng _center = const LatLng(17.3850, 78.4867);
   String _status = 'accepted';
   Map<String, dynamic>? _trip;
@@ -350,23 +351,19 @@ class _TripScreenState extends State<TripScreen>
     final fromLng = origin?.longitude ?? _center.longitude;
     await _fetchRoute(fromLat, fromLng, tLat, tLng);
 
-    if (_mapController != null) {
-      final swLat = min(fromLat, tLat);
-      final swLng = min(fromLng, tLng);
-      final neLat = max(fromLat, tLat);
-      final neLng = max(fromLng, tLng);
-      await _mapController!.animateCamera(
-        CameraUpdate.newLatLngBounds(
-          LatLngBounds(
-            southwest: LatLng(swLat, swLng),
-            northeast: LatLng(neLat, neLng),
-          ),
-          84,
-        ),
-      );
-      if (showReadySnack) {
-        _showSnack('Route ready inside app for ${_resolveTargetLabel()}');
-      }
+    final swLat = min(fromLat, tLat);
+    final swLng = min(fromLng, tLng);
+    final neLat = max(fromLat, tLat);
+    final neLng = max(fromLng, tLng);
+    _mapController.fitBounds(
+      LatLngBounds(
+        southwest: LatLng(swLat, swLng),
+        northeast: LatLng(neLat, neLng),
+      ),
+      padding: 84,
+    );
+    if (showReadySnack) {
+      _showSnack('Route ready inside app for ${_resolveTargetLabel()}');
     }
   }
 
@@ -553,7 +550,7 @@ class _TripScreenState extends State<TripScreen>
     try {
       _tts.stop();
     } catch (_) {}
-    _mapController?.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -939,7 +936,7 @@ class _TripScreenState extends State<TripScreen>
       _lastTripPosition = pos;
       if (!mounted) return;
       setState(() => _center = LatLng(pos.latitude, pos.longitude));
-      _mapController?.animateCamera(CameraUpdate.newLatLng(_center));
+      _mapController.move(_center);
       _updateSelfMarker(
         pos.latitude,
         pos.longitude,
@@ -1992,9 +1989,7 @@ class _TripScreenState extends State<TripScreen>
 
     if (tLat != 0 && tLng != 0) {
       await _focusRouteOnMap(showReadySnack: true);
-      if (_mapController != null) {
-        return;
-      }
+      return;
     }
     final uri = tLat != 0 && tLng != 0
         ? Uri.parse(
@@ -2108,20 +2103,15 @@ class _TripScreenState extends State<TripScreen>
         body: Stack(children: [
           // ── Full screen map ────────────────────────────────────────────────
           Positioned.fill(
-            child: GoogleMap(
+            child: JagoMapView(
+              controller: _mapController,
               initialCameraPosition: CameraPosition(target: _center, zoom: 15),
-              onMapCreated: (c) {
-                _mapController = c;
-                c.animateCamera(CameraUpdate.newLatLng(_center));
+              onMapCreated: (_) {
+                _mapController.move(_center);
                 _initMapMarkers();
               },
               markers: _markers,
               polylines: _polylines,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              mapToolbarEnabled: false,
-              compassEnabled: false,
               padding:
                   EdgeInsets.only(bottom: bottomOverlayOffset + 80, top: 86),
             ),
@@ -2312,13 +2302,11 @@ class _TripScreenState extends State<TripScreen>
 
   void _centerDriverOnMap() {
     final pos = _lastTripPosition;
-    if (pos == null || _mapController == null) {
+    if (pos == null) {
       _focusRouteOnMap(showReadySnack: true);
       return;
     }
-    _mapController!.animateCamera(
-      CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 17),
-    );
+    _mapController.moveZoom(LatLng(pos.latitude, pos.longitude), 17);
   }
 
   Widget _buildStageStrip() {

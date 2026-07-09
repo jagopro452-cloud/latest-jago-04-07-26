@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
-        <color android:color="#E8F2FF"/>
+        <color android:color="#F8FAFC"/>
     </item>
-    <item>
+    <item
+        android:left="88dp"
+        android:top="88dp"
+        android:right="88dp"
+        android:bottom="88dp">
         <bitmap
             android:gravity="center"
             android:src="@drawable/splash_logo" />

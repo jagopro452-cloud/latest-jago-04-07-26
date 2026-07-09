@@ -181,7 +181,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'vehicleType': _vehicleType,
           'gender': _gender,
         }),
-      );
+      ).timeout(const Duration(seconds: 20));
 
       if (profileRes.statusCode != 200) {
         String msg = 'Failed to update profile';

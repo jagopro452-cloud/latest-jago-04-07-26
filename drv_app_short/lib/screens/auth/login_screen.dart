@@ -113,15 +113,13 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                 opacity: _logoFade,
                 child: SafeArea(
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Container(
-                      width: 76,
-                      height: 76,
-                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), color: Colors.white.withValues(alpha: 0.2), border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1.5)),
-                      child: Padding(padding: const EdgeInsets.all(10), child: JT.logoWhite(height: 44)),
+                    JT.brandBadge(
+                      dark: true,
+                      logoHeight: 26,
+                      padding: 12,
+                      radius: 20,
                     ),
-                    const SizedBox(height: 18),
-                    JT.logoWhite(height: 36),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 12),
                     Text('Earn. Drive. Grow.', style: GoogleFonts.poppins(fontSize: 12, color: Colors.white.withValues(alpha: 0.75), letterSpacing: 0.5)),
                   ]),
                 ),
@@ -139,11 +137,11 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                   child: SingleChildScrollView(
                     padding: EdgeInsets.only(left: 28, right: 28, top: 8, bottom: MediaQuery.of(context).viewInsets.bottom + 32),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Center(child: Container(margin: const EdgeInsets.only(top: 12, bottom: 24), width: 36, height: 4, decoration: BoxDecoration(color: const Color(0xFFE2E8F0), borderRadius: BorderRadius.circular(2)))),
-                      Text('Welcome Back', style: GoogleFonts.poppins(fontSize: 26, fontWeight: FontWeight.w400, color: _dark)),
+                      Center(child: Container(margin: const EdgeInsets.only(top: 12, bottom: 20), width: 36, height: 4, decoration: BoxDecoration(color: const Color(0xFFE2E8F0), borderRadius: BorderRadius.circular(2)))),
+                      Text('Welcome Back', style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.w500, color: _dark)),
                       const SizedBox(height: 4),
                       Text('Login with mobile number and password', style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8))),
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
                       _buildPhoneField(),
                       const SizedBox(height: 14),
                       _buildPasswordField(),

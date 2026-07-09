@@ -90,6 +90,12 @@
                 <data android:scheme="https" android:host="jagopro.org" android:pathPrefix="/voice-booking" />
             </intent-filter>
         </activity>
+        <!-- Required on Android 14+ (API 34+): foreground service must declare type -->
+        <service
+            android:name="com.baseflow.geolocator.GeolocatorLocationService"
+            android:exported="false"
+            android:foregroundServiceType="location"/>
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>

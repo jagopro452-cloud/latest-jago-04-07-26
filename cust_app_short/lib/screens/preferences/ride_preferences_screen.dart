@@ -31,7 +31,7 @@ class _RidePreferencesScreenState extends State<RidePreferencesScreen> {
     setState(() => _loading = true);
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/customer/preferences'), headers: headers).timeout(const Duration(seconds: 8));
+      final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/app/customer/preferences'), headers: headers);
       if (res.statusCode == 200 && mounted) {
         final d = jsonDecode(res.body);
         setState(() {
@@ -62,7 +62,7 @@ class _RidePreferencesScreenState extends State<RidePreferencesScreen> {
           'extraLuggage': _extraLuggage,
           'preferredGender': _preferredGender,
         }),
-      ).timeout(const Duration(seconds: 10));
+      );
       if (!mounted) return;
       final body = jsonDecode(res.body);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -136,7 +136,7 @@ class _RidePreferencesScreenState extends State<RidePreferencesScreen> {
                             child: Row(children: [
                               const Icon(Icons.shield, color: Colors.pink, size: 16),
                               SizedBox(width: JT.spacing6),
-                              Expanded(child: Text('Nearby women drivers are prioritized first. If none are available, any pilot may be assigned.', style: JT.caption.copyWith(color: Colors.pink))),
+                              Expanded(child: Text('Best effort to assign women driver.\nAvailability may vary.', style: JT.caption.copyWith(color: Colors.pink))),
                             ]),
                           ),
                         ],

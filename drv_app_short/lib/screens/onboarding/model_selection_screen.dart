@@ -32,7 +32,7 @@ class _ModelSelectionScreenState extends State<ModelSelectionScreen> {
           Uri.parse('${ApiConfig.baseUrl}/api/app/driver/choose-model'),
           headers: {...headers, 'Content-Type': 'application/json'},
           body: jsonEncode({'model': 'commission'}),
-        );
+        ).timeout(const Duration(seconds: 10));
 
         if (res.statusCode == 200) {
           if (!mounted) return;

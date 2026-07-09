@@ -159,7 +159,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: _jagoBlue.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 2)),
+          BoxShadow(color: _jagoBlue.withValues(alpha: 0.04), blurRadius: 12, offset: const Offset(0, 2)),
         ],
       ),
       child: Row(
@@ -167,7 +167,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
         children: [
           Text(
             'New Request',
-            style: GoogleFonts.outfit(
+            style: GoogleFonts.poppins(
               fontSize: 22,
               fontWeight: FontWeight.w700,
               color: _textDark,
@@ -184,7 +184,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
               children: [
                 Text(
                   'ON',
-                  style: GoogleFonts.outfit(
+                  style: GoogleFonts.poppins(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
                     fontSize: 14,
@@ -245,7 +245,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
           const SizedBox(height: 6),
           Text(
             '+₹$extra',
-            style: GoogleFonts.outfit(
+            style: GoogleFonts.poppins(
               fontSize: 12,
               fontWeight: FontWeight.w700,
               color: _jagoBlueDark,
@@ -273,9 +273,9 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           decoration: BoxDecoration(
-            color: _jagoBlue.withOpacity(0.1),
+            color: _jagoBlue.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _jagoBlue.withOpacity(0.2)),
+            border: Border.all(color: _jagoBlue.withValues(alpha: 0.2)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -284,7 +284,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
               const SizedBox(width: 6),
               Text(
                 'Go To',
-                style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: _jagoBlue),
+                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: _jagoBlue),
               ),
             ],
           ),
@@ -293,10 +293,10 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: _jagoBlue.withOpacity(0.12)),
+            border: Border.all(color: _jagoBlue.withValues(alpha: 0.12)),
             boxShadow: [
               BoxShadow(
-                color: _jagoBlue.withOpacity(0.06),
+                color: _jagoBlue.withValues(alpha: 0.06),
                 blurRadius: 22,
                 offset: const Offset(0, 10),
               ),
@@ -327,7 +327,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                               const SizedBox(width: 6),
                               Text(
                                 vehicleType,
-                                style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w700, color: _jagoBlue),
+                                style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: _jagoBlue),
                               ),
                             ],
                           ),
@@ -336,7 +336,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                           const SizedBox(height: 8),
                           Text(
                             '+₹$extra incentive',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.poppins(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: _jagoBlueDark,
@@ -347,7 +347,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                     ),
                     Text(
                       '₹$fare',
-                      style: GoogleFonts.outfit(
+                      style: GoogleFonts.poppins(
                         fontSize: 38,
                         fontWeight: FontWeight.w900,
                         color: _jagoBlue,
@@ -406,7 +406,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                               shape: BoxShape.circle,
                               color: Colors.white,
                               boxShadow: [
-                                BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
+                                BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4),
                               ],
                             ),
                             child: const Icon(Icons.close_rounded, color: Colors.black, size: 24),
@@ -426,7 +426,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                             borderRadius: BorderRadius.circular(32),
                             boxShadow: [
                               BoxShadow(
-                                color: _jagoBlue.withOpacity(0.22),
+                                color: _jagoBlue.withValues(alpha: 0.22),
                                 blurRadius: 14,
                                 offset: const Offset(0, 4),
                               ),
@@ -435,7 +435,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                           child: Center(
                             child: Text(
                               'Accept Ride',
-                              style: GoogleFonts.outfit(
+                              style: GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontSize: 22,
                                 fontWeight: FontWeight.w800,
@@ -471,7 +471,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                 shape: BoxShape.circle,
                 color: _jagoBlue,
                 border: Border.all(color: Colors.white, width: 2),
-                boxShadow: [BoxShadow(color: _jagoBlue.withOpacity(0.3), blurRadius: 4)],
+                boxShadow: [BoxShadow(color: _jagoBlue.withValues(alpha: 0.3), blurRadius: 4)],
               ),
             ),
             // Dynamic connector
@@ -482,7 +482,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [_jagoBlue, _jagoBlue.withOpacity(0.24)],
+                  colors: [_jagoBlue, _jagoBlue.withValues(alpha: 0.24)],
                 ),
               ),
             ),
@@ -497,24 +497,24 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
             children: [
               Text(
                 '$pickupDist Km away',
-                style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w800, color: _textDark),
+                style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: _textDark),
               ),
               const SizedBox(height: 2),
               Text(
                 pickup,
-                style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w400, color: _textGrey),
+                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w400, color: _textGrey),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 24),
               Text(
                 '$tripDist Km trip',
-                style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w800, color: _textDark),
+                style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: _textDark),
               ),
               const SizedBox(height: 2),
               Text(
                 dest,
-                style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w400, color: _textGrey),
+                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w400, color: _textGrey),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),

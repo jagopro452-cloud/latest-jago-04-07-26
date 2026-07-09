@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class JT {
@@ -19,28 +18,29 @@ class JT {
   // ── PREMIUM DESIGN SYSTEM (v3 Senior-Level) ────────────────────────────
 
   // ──────────────────────────────────────────────────────────────────────────
-  // PRIMARY PALETTE — Professional Blue (original JAGO app)
+  // PRIMARY PALETTE — Professional Blue
   // ──────────────────────────────────────────────────────────────────────────
-  static const Color primary = Color(0xFF2D8CFF);
-  static const Color primaryLight = Color(0xFFE8F2FF);
-  static const Color primaryDark = Color(0xFF1A6FDB);
-  static const Color secondary = Color(0xFF5B9DFF);
+  static const Color primary = Color(0xFF2563EB);
+  static const Color primaryLight = Color(0xFFDBEAFE);
+  static const Color primaryDark = Color(0xFF1D4ED8);
+  static const Color secondary = Color(0xFF3B82F6);
+  static const Color mapAccent = Color(0xFF2563EB);
 
   // ──────────────────────────────────────────────────────────────────────────
   // BACKGROUNDS & SURFACES
   // ──────────────────────────────────────────────────────────────────────────
-  static const Color bg = Color(0xFFFFFFFF); // Main background
-  static const Color bgSoft = Color(0xFFF9FAFB); // Soft background
-  static const Color surface = Color(0xFFFFFFFF); // Surface
-  static const Color surfaceAlt = Color(0xFFF3F6FF);
-  static const Color card = Color(0xFFFBFCFE); // Premium card bg
+  static const Color bg = Color(0xFFF8FAFC);
+  static const Color bgSoft = Color(0xFFF8FAFC);
+  static const Color surface = Color(0xFFFFFFFF);
+  static const Color surfaceAlt = Color(0xFFDBEAFE);
+  static const Color card = Color(0xFFFFFFFF);
 
   // ──────────────────────────────────────────────────────────────────────────
   // BORDER & DIVIDERS
   // ──────────────────────────────────────────────────────────────────────────
   static const Color border = Color(0xFFE5E7EB);
-  static const Color borderLight = Color(0xFFF0F1F3);
-  static const Color divider = Color(0xFFECEEF1);
+  static const Color borderLight = Color(0xFFE5E7EB);
+  static const Color divider = Color(0xFFE5E7EB);
 
   // ──────────────────────────────────────────────────────────────────────────
   // TEXT HIERARCHY
@@ -49,101 +49,37 @@ class JT {
   static const Color textSecondary = Color(0xFF6B7280); // Body text
   static const Color textTertiary = Color(0xFF9CA3AF); // Subtle text
   static const Color iconInactive = Color(0xFFD1D5DB);
+  static const Color buttonText = Color(0xFFFFFFFF);
 
   // ──────────────────────────────────────────────────────────────────────────
   // SEMANTIC COLORS
   // ──────────────────────────────────────────────────────────────────────────
-  static const Color error = Color(0xFFDC2626);
+  static const Color error = Color(0xFFEF4444);
   static const Color errorLight = Color(0xFFFEE2E2);
-  static const Color success = Color(0xFF16A34A);
+  static const Color success = Color(0xFF22C55E);
   static const Color successLight = Color(0xFFDCFCE7);
-  /// Parcel module — original JAGO gold (Send Parcel home card)
-  static const Color parcelGold = Color(0xFFC29763);
-  static const Color parcelGoldLight = Color(0xFFD6B58F);
-  static const Color parcelGoldDark = Color(0xFFA67C4A);
-  static const Color parcelGoldSoft = Color(0xFFF8F0E8);
-  static const Color parcelGreen = Color(0xFFC29763);
-  static const Color parcelGreenDark = Color(0xFFA67C4A);
-  static const Color parcelGreenLight = Color(0xFFD6B58F);
   static const Color warning = Color(0xFFF59E0B);
   static const Color warningLight = Color(0xFFFEF3C7);
-  static const Color info = Color(0xFF0EA5E9);
-  static const Color infoLight = Color(0xFFCFFAFE);
+  static const Color danger = Color(0xFFEF4444);
+  static const Color info = Color(0xFF2563EB);
+  static const Color infoLight = Color(0xFFDBEAFE);
 
-  // ── GRADIENTS ──
+  /// Unified accent for rides, parcel, and service tiles — one JAGO blue everywhere.
+  static const Color serviceAccent = primary;
+  static const Color serviceAccentLight = primaryLight;
+  static const Color serviceAccentDark = primaryDark;
+
   static const LinearGradient grad = LinearGradient(
-    colors: [Color(0xFF2D8CFF), Color(0xFF1A6FDB)],
+    colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient gradReverse = LinearGradient(
-    colors: [Color(0xFF1A6FDB), Color(0xFF2D8CFF)],
+    colors: [Color(0xFF1D4ED8), Color(0xFF2563EB)],
     begin: Alignment.bottomLeft,
     end: Alignment.topRight,
   );
-
-  static const LinearGradient parcelGrad = LinearGradient(
-    colors: [Color(0xFFC29763), Color(0xFFD6B58F)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  /// Module-aware accents — ride = blue, parcel = gold (forms & navigation)
-  static Color moduleAccent(bool isParcel) =>
-      isParcel ? parcelGold : primary;
-
-  static Color moduleAccentDark(bool isParcel) =>
-      isParcel ? parcelGoldDark : primaryDark;
-
-  static Color moduleAccentLight(bool isParcel) =>
-      isParcel ? parcelGoldSoft : primaryLight;
-
-  static Color moduleFieldBorder(bool isParcel) => isParcel
-      ? parcelGold.withValues(alpha: 0.28)
-      : const Color(0xFFE8EFFF);
-
-  static Color moduleFieldBg(bool isParcel) =>
-      isParcel ? parcelGoldSoft : const Color(0xFFF5F7FF);
-
-  static Color modulePickupDot(bool isParcel) =>
-      isParcel ? parcelGold : primary;
-
-  static Color moduleDropDot(bool isParcel) =>
-      isParcel ? parcelGoldDark : primary;
-
-  static LinearGradient moduleButtonGrad(bool isParcel) =>
-      isParcel ? parcelGrad : grad;
-
-  static InputDecoration moduleFieldDecoration({
-    required bool isParcel,
-    required String hintText,
-    Widget? prefixIcon,
-    int maxLines = 1,
-  }) {
-    final accent = moduleAccent(isParcel);
-    return InputDecoration(
-      hintText: hintText,
-      hintStyle: GoogleFonts.poppins(fontSize: 13, color: textTertiary),
-      prefixIcon: prefixIcon,
-      filled: true,
-      fillColor: isParcel ? parcelGoldSoft : bgSoft,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide.none,
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: moduleFieldBorder(isParcel)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: accent, width: 1.5),
-      ),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-    );
-  }
 
   // ── SHADOWS — Premium Elevation System ──
   static List<BoxShadow> get shadowXs => [
@@ -413,7 +349,8 @@ class JT {
       ColorFiltered(
         colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
         child: Image.asset('assets/images/jago_logo_new.png',
-            height: height, fit: BoxFit.contain),
+            height: height,
+            fit: BoxFit.contain),
       );
 
   // ── MODERN SPACING SYSTEM ──
@@ -428,7 +365,62 @@ class JT {
   static const double spacing32 = 32;
   static const double spacing40 = 40;
 
-  // ── BORDER RADIUS ──
+  static const double radiusSheet = 28;
+
+  /// Primary booking CTA — full-width, sticky footer style.
+  static Widget bookCta({
+    required String label,
+    required VoidCallback? onTap,
+    bool loading = false,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: loading ? null : onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Ink(
+          height: 56,
+          decoration: BoxDecoration(
+            gradient: onTap == null && !loading
+                ? null
+                : grad,
+            color: onTap == null && !loading ? border : null,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: onTap == null && !loading
+                ? null
+                : [
+                    BoxShadow(
+                      color: primary.withValues(alpha: 0.35),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+          ),
+          child: Center(
+            child: loading
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      color: buttonText,
+                      strokeWidth: 2.5,
+                    ),
+                  )
+                : Text(
+                    label,
+                    style: GoogleFonts.poppins(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: onTap == null && !loading
+                          ? textTertiary
+                          : buttonText,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
   static const double radiusSm = 8;
   static const double radiusMd = 12;
   static const double radiusLg = 16;

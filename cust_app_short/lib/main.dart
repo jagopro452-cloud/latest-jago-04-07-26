@@ -8,6 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'config/api_config.dart';
 import 'screens/splash_screen.dart';
 import 'services/analytics_service.dart';
 import 'services/fcm_service.dart';
@@ -52,6 +55,7 @@ void main() async {
   await SecureTokenStore.migrateFromSharedPreferences();
   await loadThemePreference();
   await L.init();
+  await _preloadRemoteConfig();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   try {
     final isJailbroken = await FlutterJailbreakDetection.jailbroken;
@@ -109,6 +113,20 @@ void main() async {
     );
   };
   runApp(const JagoCustomerApp());
+}
+
+Future<void> _preloadRemoteConfig() async {
+  if (ApiConfig.googleMapsAndroidKeyEnv.isNotEmpty) return;
+  try {
+    final res = await http.get(Uri.parse(ApiConfig.configs)).timeout(const Duration(seconds: 8));
+    if (res.statusCode != 200) return;
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final cfg = data['configs'];
+    if (cfg is Map) {
+      final key = cfg['googleMapsAndroidKey']?.toString();
+      ApiConfig.setRuntimeMapsAndroidKey(key);
+    }
+  } catch (_) {}
 }
 
 class JagoCustomerApp extends StatefulWidget {

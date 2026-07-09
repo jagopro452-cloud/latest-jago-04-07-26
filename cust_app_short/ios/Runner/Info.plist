@@ -58,9 +58,9 @@
 		<string>voip</string>
 	</array>
 
-	<!-- Google Maps — ROTATE THIS KEY via Google Cloud Console after removing from git history -->
+	<!-- Google Maps key loaded at runtime from /api/app/configs — do not embed secrets here -->
 	<key>GOOGLE_MAPS_API_KEY</key>
-	<string>AIzaSyCvK2we4pxX_Wdjjct6DNalW99Gqj__tyc</string>
+	<string></string>
 	<key>io.flutter.embedded_views_preview</key>
 	<true/>
 

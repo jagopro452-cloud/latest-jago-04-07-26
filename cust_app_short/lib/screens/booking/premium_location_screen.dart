@@ -63,11 +63,6 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
   List<Map<String, dynamic>> _recentTrips = [];
   bool _isLoadingTrips = true;
 
-  bool get _isParcel => widget.serviceType == 'parcel';
-  Color get _accent => JT.moduleAccent(_isParcel);
-  Color get _accentLight => JT.moduleAccentLight(_isParcel);
-  Color get _fieldBorder => JT.moduleFieldBorder(_isParcel);
-
   @override
   void initState() {
     super.initState();
@@ -79,6 +74,11 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
     _pickupFocus.addListener(_onFocusChange);
     _dropFocus.addListener(_onFocusChange);
     _fetchRecentTrips();
+    if (_pickupLat == 0 || _pickup.isEmpty || _pickup.contains('Tap to detect')) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _detectLocation());
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _dropFocus.requestFocus());
+    }
   }
 
   Future<void> _fetchRecentTrips() async {
@@ -101,7 +101,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
         : '';
     setState(() {
       _zoneWarning =
-          'We are coming soon to your area$zoneSuffix. JAGO services are available only inside configured service zones.';
+          'We are not serving this area$zoneSuffix yet. Choose a location inside an active service zone.';
     });
   }
 
@@ -131,18 +131,33 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-      Position p = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.best),
-      );
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) setState(() => _detectingLocation = false);
+        return;
+      }
+      final last = await Geolocator.getLastKnownPosition();
+      Position? p;
+      if (last != null && last.latitude != 0 && last.longitude != 0) {
+        p = last;
+      } else {
+        p = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.medium,
+            timeLimit: Duration(seconds: 8),
+          ),
+        );
+      }
       final addr = await _reverseGeocode(p.latitude, p.longitude);
       if (!mounted) return;
       setState(() {
         _pickup = addr;
-        _pickupLat = p.latitude;
+        _pickupLat = p!.latitude;
         _pickupLng = p.longitude;
         _pickupCtrl.text = addr;
         _detectingLocation = false;
       });
+      _dropFocus.requestFocus();
     } catch (e) {
       if (mounted) setState(() => _detectingLocation = false);
     }
@@ -157,7 +172,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
       final res = await http.get(
         Uri.parse('${ApiConfig.reverseGeocode}?lat=$lat&lng=$lng'),
         headers: headers,
-      ).timeout(const Duration(seconds: 6));
+      );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         return data['formattedAddress']?.toString() ??
@@ -383,7 +398,8 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFAFAFA),
+      resizeToAvoidBottomInset: true,
+      backgroundColor: JT.bg,
       bottomNavigationBar: _buildBottomNav(),
       body: SafeArea(
         child: Column(
@@ -398,13 +414,12 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 16),
                     if (!_isTyping) _buildActionPills(),
-                    if (!_isTyping) const SizedBox(height: 24),
+                    if (!_isTyping) const SizedBox(height: 14),
                     _buildPremiumRouteCard(),
+                    const SizedBox(height: 10),
+                    _buildMapAndStopsButtons(),
                     const SizedBox(height: 16),
-                    if (!_isTyping) _buildMapAndStopsButtons(),
-                    const SizedBox(height: 24),
                     if (_isTyping && _zoneWarning != null && _searchResults.every((item) => item['serviceable'] != true))
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16),
@@ -429,6 +444,8 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                       ),
                     if (_isTyping && _searchResults.isNotEmpty)
                       _buildSearchResults()
+                    else if (_isTyping && _dropFocus.hasFocus)
+                      _buildDropTypingHelper()
                     else if (!_isTyping)
                       _buildRecentRides(),
                     const SizedBox(height: 100),
@@ -443,30 +460,9 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
       floatingActionButton: (_pickupLat != 0 && _dropLat != 0)
           ? Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: GestureDetector(
+              child: JT.bookCta(
+                label: 'Set your journey',
                 onTap: _proceedToBooking,
-                child: Container(
-                  height: 56,
-                  decoration: BoxDecoration(
-                    gradient: JT.moduleButtonGrad(_isParcel),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                          color: _accent.withOpacity(0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 10))
-                    ],
-                  ),
-                  child: Center(
-                    child: Text(
-                      _isParcel ? 'Continue to parcel' : 'Set your journey',
-                      style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white),
-                    ),
-                  ),
-                ),
               ),
             )
           : null,
@@ -481,13 +477,13 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
         // Logo (pops the screen back to home)
         GestureDetector(
           onTap: () => Navigator.pop(context),
-          child: JT.logoBlue(height: 32),
+          child: JT.logoBlue(height: 24),
         ),
         const SizedBox(width: 8),
         // Location indicator
         Expanded(
           child: Row(children: [
-            Icon(Icons.location_on_rounded, color: _accent, size: 13),
+            Icon(Icons.location_on_rounded, color: JT.primary, size: 13),
             const SizedBox(width: 3),
             Flexible(
               child: Text(
@@ -510,9 +506,9 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(color: JT.surfaceAlt, borderRadius: BorderRadius.circular(20)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.account_balance_wallet_rounded, color: _accent, size: 13),
+              Icon(Icons.account_balance_wallet_rounded, color: JT.primary, size: 13),
               const SizedBox(width: 4),
-              Text('Wallet', style: GoogleFonts.poppins(color: _accent, fontSize: 12, fontWeight: FontWeight.w500)),
+              Text('Wallet', style: GoogleFonts.poppins(color: JT.primary, fontSize: 12, fontWeight: FontWeight.w500)),
             ]),
           ),
         ),
@@ -523,8 +519,8 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
           child: Container(
             width: 36,
             height: 36,
-            decoration: BoxDecoration(color: _accent.withOpacity(0.08), shape: BoxShape.circle),
-            child: Icon(Icons.notifications_none_rounded, color: _accent, size: 20),
+            decoration: BoxDecoration(color: JT.primary.withOpacity(0.08), shape: BoxShape.circle),
+            child: Icon(Icons.notifications_none_rounded, color: JT.primary, size: 20),
           ),
         ),
       ]),
@@ -574,16 +570,16 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: isSelected
             ? BoxDecoration(
-                color: _accent.withOpacity(0.1),
+                color: const Color(0xFF2C95F1).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(20),
               )
             : const BoxDecoration(),
         child: Row(
           children: [
-            Icon(isSelected ? activeIcon : inactiveIcon, color: isSelected ? _accent : const Color(0xFF94A3B8), size: 22),
+            Icon(isSelected ? activeIcon : inactiveIcon, color: isSelected ? const Color(0xFF2C95F1) : const Color(0xFF94A3B8), size: 22),
             if (isSelected) ...[
               const SizedBox(width: 6),
-              Text(label, style: GoogleFonts.poppins(color: _accent, fontSize: 13, fontWeight: FontWeight.w600)),
+              Text(label, style: GoogleFonts.poppins(color: const Color(0xFF2C95F1), fontSize: 13, fontWeight: FontWeight.w600)),
             ]
           ],
         ),
@@ -623,67 +619,58 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
 
   Widget _buildPremiumRouteCard() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-            color: _isParcel ? _fieldBorder : const Color(0xFFE2E8F0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          )
-        ],
+        color: JT.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: JT.border),
+        boxShadow: JT.shadowSm,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Left side dots and line
           Column(
             children: [
-              const SizedBox(height: 22),
+              const SizedBox(height: 18),
               Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: JT.modulePickupDot(_isParcel),
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                  color: JT.success,
                   shape: BoxShape.circle,
                 ),
               ),
               Container(
                 width: 2,
-                height: 48,
-                color: const Color(0xFFE2E8F0),
+                height: 36,
+                color: JT.border,
               ),
               Container(
-                width: 12,
-                height: 12,
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
-                  color: JT.moduleDropDot(_isParcel),
-                  borderRadius: BorderRadius.circular(3),
+                  color: JT.primary,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ],
           ),
-          const SizedBox(width: 16),
-          // Right side inputs
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildInputField(
-                  label: _isParcel ? "PICKUP" : "FROM",
-                  hint: _isParcel ? "Pickup address?" : "Starting point?",
+                  label: "FROM",
+                  hint: "Starting point?",
                   controller: _pickupCtrl,
                   focusNode: _pickupFocus,
                   isPickup: true,
                 ),
-                const Divider(height: 24, color: Color(0xFFF1F5F9), thickness: 1.5),
+                const Divider(height: 18, color: JT.border, thickness: 1),
                 _buildInputField(
-                  label: _isParcel ? "DELIVER TO" : "DROP",
-                  hint: _isParcel ? "Delivery address?" : "Where to?",
+                  label: "DROP",
+                  hint: "Where to?",
                   controller: _dropCtrl,
                   focusNode: _dropFocus,
                   isPickup: false,
@@ -691,19 +678,19 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
               ],
             ),
           ),
-          // Swap button
           Column(
             children: [
-              const SizedBox(height: 42),
+              const SizedBox(height: 32),
               GestureDetector(
                 onTap: _swapLocations,
                 child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF1F5F9),
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: JT.bg,
                     shape: BoxShape.circle,
+                    border: Border.all(color: JT.border),
                   ),
-                  child: const Icon(Icons.swap_vert_rounded, color: Color(0xFF64748B), size: 20),
+                  child: Icon(Icons.swap_vert_rounded, color: JT.textSecondary, size: 18),
                 ),
               ),
             ],
@@ -732,6 +719,10 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                 controller: controller,
                 focusNode: focusNode,
                 onChanged: _onSearch,
+                textInputAction: TextInputAction.search,
+                keyboardType: TextInputType.streetAddress,
+                enableInteractiveSelection: true,
+                autocorrect: false,
                 style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B)),
                 decoration: InputDecoration(
                   hintText: (_detectingLocation && isPickup) ? "Locating you..." : hint,
@@ -745,10 +736,10 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
               ),
             ),
             if ((_detectingLocation && isPickup) || (_searching && focusNode.hasFocus))
-              SizedBox(
+              const SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2C95F1)),
               )
             else if (controller.text.isNotEmpty && focusNode.hasFocus)
               GestureDetector(
@@ -765,75 +756,94 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
   }
 
   Widget _buildMapAndStopsButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => MapLocationPicker(
-                title: _isParcel ? 'Select delivery location' : 'Select drop location',
-                accentColor: _accent,
-              ))).then((res) {
-                if (res != null) {
-                  setState(() {
-                    _drop = res.address;
-                    _dropLat = res.lat;
-                    _dropLng = res.lng;
-                    _dropCtrl.text = _drop;
-                  });
-                }
-              });
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.map_outlined, color: _accent, size: 18),
-                  const SizedBox(width: 8),
-                  Text("Select on map", style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B))),
-                ],
+    return GestureDetector(
+      onTap: () {
+        final pickPickup = _pickupFocus.hasFocus ||
+            (_dropLat == 0 && _dropCtrl.text.trim().isEmpty);
+        final initLat = pickPickup
+            ? (_pickupLat != 0 ? _pickupLat : 16.5062)
+            : (_dropLat != 0 ? _dropLat : (_pickupLat != 0 ? _pickupLat : 16.5062));
+        final initLng = pickPickup
+            ? (_pickupLng != 0 ? _pickupLng : 80.6480)
+            : (_dropLng != 0 ? _dropLng : (_pickupLng != 0 ? _pickupLng : 80.6480));
+        Navigator.push(context, MaterialPageRoute(builder: (context) => MapLocationPicker(
+          title: pickPickup ? 'Select Pickup Location' : 'Select Drop Location',
+          initialLat: initLat,
+          initialLng: initLng,
+        ))).then((res) {
+          if (res != null) {
+            setState(() {
+              if (pickPickup) {
+                _pickup = res.address;
+                _pickupLat = res.lat;
+                _pickupLng = res.lng;
+                _pickupCtrl.text = _pickup;
+              } else {
+                _drop = res.address;
+                _dropLat = res.lat;
+                _dropLng = res.lng;
+                _dropCtrl.text = _drop;
+              }
+            });
+          }
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: JT.card,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: JT.border),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.map_outlined, color: JT.primary, size: 16),
+            const SizedBox(width: 6),
+            Text(
+              'Select on map',
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: JT.textPrimary,
               ),
             ),
-          ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: GestureDetector(
-            onTap: () {
-              // Add stops feature not yet implemented, placeholder
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.add_rounded, color: Colors.white, size: 18),
-                  const SizedBox(width: 8),
-                  Text("Add stops", style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildDropTypingHelper() {
+    if (_searching) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator(color: Color(0xFF2C95F1), strokeWidth: 2)),
+      );
+    }
+    final q = _dropCtrl.text.trim();
+    String msg;
+    if (q.length < 2) {
+      msg = 'Type destination name (min 2 letters) or tap "Select on map"';
+    } else if (_searchResults.isEmpty) {
+      msg = 'No matches found. Tap "Select on map" to pick on map.';
+    } else {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Text(
+        msg,
+        style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF64748B)),
+      ),
     );
   }
 
   Widget _buildRecentRides() {
     if (_isLoadingTrips) {
-      return Padding(
+      return const Padding(
         padding: EdgeInsets.symmetric(vertical: 40),
-        child: Center(child: CircularProgressIndicator(color: _accent, strokeWidth: 2)),
+        child: Center(child: CircularProgressIndicator(color: Color(0xFF2C95F1), strokeWidth: 2)),
       );
     }
 
@@ -851,7 +861,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text("RECENT", style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFF94A3B8), letterSpacing: 1.0)),
-            Text("See all", style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: _accent)),
+            Text("See all", style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFF2C95F1))),
           ],
         ),
         const SizedBox(height: 16),
@@ -877,10 +887,10 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: _accent.withOpacity(0.1),
+                      color: const Color(0xFF2C95F1).withOpacity(0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(Icons.history_rounded, color: _accent, size: 20),
+                    child: const Icon(Icons.history_rounded, color: Color(0xFF2C95F1), size: 20),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -928,12 +938,12 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
             leading: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: _accent.withOpacity(0.1),
+                color: const Color(0xFF2C95F1).withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
+              child: const Icon(
                 Icons.location_on_rounded,
-                color: _accent,
+                color: Color(0xFF2C95F1),
                 size: 20,
               ),
             ),
@@ -952,7 +962,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                     margin: const EdgeInsets.only(top: 6),
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: _accent.withOpacity(0.08),
+                      color: const Color(0xFF2C95F1).withOpacity(0.08),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -960,7 +970,7 @@ class _PremiumLocationScreenState extends State<PremiumLocationScreen> {
                       style: GoogleFonts.poppins(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: _accent,
+                        color: const Color(0xFF2C95F1),
                       ),
                     ),
                   ),

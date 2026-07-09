@@ -19,6 +19,7 @@ if (localPropertiesFile.exists()) {
 
 def mapsApiKey =
         (localProperties.getProperty('googleMapsApiKey')
+        ?: System.getenv('GOOGLE_MAPS_ANDROID_KEY')
         ?: System.getenv('GOOGLE_MAPS_API_KEY')
         ?: '').trim()
 

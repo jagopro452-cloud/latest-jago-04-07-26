@@ -5,6 +5,21 @@ import 'package:http/http.dart' as http;
 import 'package:jago_customer/services/api_retry.dart';
 
 void main() {
+  group('generateIdempotencyKey', () {
+    test('produces a valid UUID v4 format', () {
+      final key = generateIdempotencyKey();
+      final uuidV4 = RegExp(
+        r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+      );
+      expect(uuidV4.hasMatch(key), isTrue, reason: 'Key was: $key');
+    });
+
+    test('every call produces a unique value', () {
+      final keys = List.generate(50, (_) => generateIdempotencyKey());
+      expect(keys.toSet().length, 50);
+    });
+  });
+
   group('API Retry Edge Cases', () {
     test('Returns successfully on first try', () async {
       int calls = 0;

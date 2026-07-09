@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../../widgets/jago_map_markers.dart';
+import '../../widgets/vehicle_artwork.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../../config/api_config.dart';
@@ -16,7 +18,6 @@ import '../../services/analytics_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/alarm_service.dart';
 import '../../services/call_service.dart';
-import '../../widgets/jago_map_markers.dart';
 import '../call/call_screen.dart';
 import '../chat/trip_chat_sheet.dart';
 
@@ -27,7 +28,14 @@ import 'trip_completion_screen.dart';
 class TrackingScreen extends StatefulWidget {
   final String tripId;
   final bool isParcel;
-  const TrackingScreen({super.key, required this.tripId, this.isParcel = false});
+  /// ride | parcel | pool | outstation
+  final String bookingType;
+  const TrackingScreen({
+    super.key,
+    required this.tripId,
+    this.isParcel = false,
+    this.bookingType = 'ride',
+  });
   @override
   State<TrackingScreen> createState() => _TrackingScreenState();
 }
@@ -35,10 +43,9 @@ class TrackingScreen extends StatefulWidget {
 class _TrackingScreenState extends State<TrackingScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   final SocketService _socket = SocketService();
-  GoogleMapController? _mapController;
+  final JagoMapController _mapController = JagoMapController();
   LatLng _center = const LatLng(17.3850, 78.4867);
   LatLng? _driverLatLng;
-  double _driverHeading = 0;
   String _status = 'searching';
   Map<String, dynamic>? _trip;
   double _walletPendingAmount =
@@ -57,14 +64,19 @@ class _TrackingScreenState extends State<TrackingScreen>
   Timer? _searchAbortTimer;
   bool _boostLoading = false;
   Timer? _nearbyDriversTimer;
+  final Map<String, BitmapDescriptor> _markerIconCache = {};
   List<Map<String, dynamic>> _nearbyDrivers = [];
 
   bool _isConnected = true;
   StreamSubscription? _connSub;
   Timer? _pollTimer;
-  int _statusVersion = 0; // monotonic counter — prevents stale HTTP poll overwriting fresh socket state
 
   bool _isArriving = false; // "Pilot is about to arrive" flag
+
+  String get _mode =>
+      widget.isParcel ? 'parcel' : widget.bookingType;
+
+  bool get _isRideMode => _mode == 'ride';
 
   // Custom Top Banner state
   String? _bannerMessage;
@@ -79,47 +91,51 @@ class _TrackingScreenState extends State<TrackingScreen>
     _pulseCtrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 2))
           ..repeat(reverse: true);
-    _connSub = _socket.onConnectionChanged.listen((connected) {
-      if (mounted) {
-        setState(() => _isConnected = connected);
-        if (!connected) {
-          _showStatusBanner('Waiting for connection...', widget.isParcel ? JT.parcelGold : JT.primary);
-        } else {
-          _showStatusBanner(
-              'Reconnected!',
-              widget.isParcel ? JT.parcelGold : const Color(0xFF10B981));
-          // Re-join tracking room on every reconnect
-          if (widget.isParcel) {
-            _socket.trackParcel(widget.tripId);
+    if (_isRideMode) {
+      _connSub = _socket.onConnectionChanged.listen((connected) {
+        if (mounted) {
+          setState(() => _isConnected = connected);
+          if (!connected) {
+            _showStatusBanner('Waiting for connection...', Colors.orange);
           } else {
+            _showStatusBanner('Reconnected!', const Color(0xFF10B981));
             _socket.trackTrip(widget.tripId);
+            _pollStatus();
+            Future.delayed(const Duration(milliseconds: 800), _pollStatus);
+            Future.delayed(const Duration(milliseconds: 2500), _pollStatus);
           }
-          // Triple poll to reconcile state quickly
-          _pollStatus();
-          Future.delayed(const Duration(milliseconds: 800), _pollStatus);
-          Future.delayed(const Duration(milliseconds: 2500), _pollStatus);
         }
-      }
-    });
-    _connectSocket();
+      });
+      _connectSocket();
+    } else {
+      _isConnected = true;
+    }
     _pollStatus();
-    _loadCancelReasons();
+    if (_isRideMode) _loadCancelReasons();
     CallService().init();
-    _listenForIncomingCalls();
-    // Adaptive HTTP polling: 5s for searching/accepted, 10s for in_progress, stopped for terminal
+    if (_isRideMode) _listenForIncomingCalls();
     _restartPollTimer();
-    // Start 90-second timeout warning for searching state
-    _startSearchTimeoutTimer();
-    _startDispatchRecovery();
-    _startNearbyDriversPolling();
+    if (_isRideMode) {
+      _startSearchTimeoutTimer();
+      _startDispatchRecovery();
+      _startNearbyDriversPolling();
+    }
+    if (widget.tripId.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invalid booking — could not open tracking.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.of(context).pop();
+      });
+    }
   }
 
   String _eventTripId(Map<String, dynamic> data) {
-    final direct = data['tripId'] ??
-        data['trip_id'] ??
-        data['orderId'] ??
-        data['order_id'] ??
-        data['id'];
+    final direct = data['tripId'] ?? data['trip_id'] ?? data['id'];
     if (direct != null && direct.toString().isNotEmpty) {
       return direct.toString();
     }
@@ -139,146 +155,27 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   bool _isLiveTripStatus(String status) {
-    return status == 'in_progress' ||
-        status == 'on_the_way' ||
-        status == 'in_transit' ||
-        status == 'picked_up';
-  }
-
-  Map<String, int> _statusRanks() {
-    return const {
-      'pending': 0,
-      'searching': 0,
-      'driver_assigned': 1,
-      'accepted': 2,
-      'picked_up': 3,
-      'arrived': 3,
-      'in_progress': 4,
-      'on_the_way': 4,
-      'in_transit': 4,
-      'completed': 5,
-      'cancelled': 5,
-    };
-  }
-
-  Map<String, dynamic> _normalizeParcelOrder(Map<String, dynamic> order) {
-    final drops = order['drops'] is List
-        ? List<Map<String, dynamic>>.from(
-            (order['drops'] as List).map((e) => Map<String, dynamic>.from(e as Map)))
-        : <Map<String, dynamic>>[];
-    final progress = order['progress'] is Map
-        ? Map<String, dynamic>.from(order['progress'] as Map)
-        : <String, dynamic>{};
-    final currentStop = progress['currentStop'] is Map
-        ? Map<String, dynamic>.from(progress['currentStop'] as Map)
-        : (drops.isNotEmpty ? drops.last : null);
-    final dest = currentStop ?? (drops.isNotEmpty ? drops.last : null);
-
-    return {
-      'id': order['id'],
-      'currentStatus': order['currentStatus'] ?? order['current_status'] ?? _status,
-      'driverName': order['driverName'] ?? order['driver_name'],
-      'driverPhone': order['driverPhone'] ?? order['driver_phone'],
-      'driverLat': order['driverLat'] ?? order['driver_lat'],
-      'driverLng': order['driverLng'] ?? order['driver_lng'],
-      'pickupLat': order['pickupLat'] ?? order['pickup_lat'],
-      'pickupLng': order['pickupLng'] ?? order['pickup_lng'],
-      'pickupAddress': order['pickupAddress'] ?? order['pickup_address'],
-      'pickupShortName': order['pickupShortName'] ?? order['pickup_short_name'],
-      'destinationLat': dest?['lat'] ?? dest?['dropLat'] ?? order['dropLat'] ?? order['drop_lat'],
-      'destinationLng': dest?['lng'] ?? dest?['dropLng'] ?? order['dropLng'] ?? order['drop_lng'],
-      'destinationAddress':
-          dest?['address'] ?? dest?['dropAddress'] ?? order['dropAddress'] ?? order['drop_address'],
-      'destinationShortName': dest?['receiverName'] ?? order['receiverName'],
-      'estimatedFare': order['totalFare'] ?? order['total_fare'] ?? order['estimatedFare'],
-      'vehicleName': order['vehicleCategory'] ?? order['vehicle_category'],
-      'type': 'parcel',
-      'tripType': 'parcel',
-      'parcelDrops': drops,
-      'parcelProgress': progress,
-    };
-  }
-
-  void _onDriverLocationUpdate(Map<String, dynamic> data) {
-    if (!mounted) return;
-    final lat = double.tryParse(data['lat']?.toString() ?? '');
-    final lng = double.tryParse(data['lng']?.toString() ?? '');
-    if (lat != null && lng != null) {
-      final nextLatLng = LatLng(lat, lng);
-      final heading = _resolveHeading(data, _driverLatLng, nextLatLng);
-      if (!widget.isParcel) _checkArrivingStatus(lat, lng);
-      setState(() {
-        _driverLatLng = nextLatLng;
-        _driverHeading = heading;
-        _updateMapMarkers();
-        _fetchRouteForStatus();
-      });
-    }
-  }
-
-  void _applyParcelStatusEvent(Map<String, dynamic> data) {
-    if (!_eventMatchesTrip(data)) return;
-    final newStatus = data['status']?.toString();
-    if (newStatus == null || newStatus.isEmpty) return;
-
-    final statusRank = _statusRanks();
-    final incomingRank = statusRank[newStatus] ?? 0;
-    final currentRank = statusRank[_status] ?? 0;
-    if (incomingRank < currentRank) return;
-
-    if (newStatus != _status) {
-      if (newStatus != 'searching') _stopDispatchRecovery();
-      _statusVersion++;
-      setState(() {
-        _status = newStatus;
-        final update = <String, dynamic>{};
-        if (data['driverName'] != null) update['driverName'] = data['driverName'];
-        if (data['driverPhone'] != null) update['driverPhone'] = data['driverPhone'];
-        if (data['driverId'] != null) update['driverId'] = data['driverId'];
-        _trip = (_trip != null) ? {..._trip!, ...update} : update;
-      });
-      _handleStatusTransition(newStatus);
-      HapticFeedback.lightImpact();
-      _pollStatus();
-    }
-
-    if (newStatus == 'completed' || newStatus == 'cancelled') {
-      _pollTimer?.cancel();
-      _pollStatus();
-    }
+    return status == 'in_progress' || status == 'on_the_way';
   }
 
   void _connectSocket() {
     CallService().init();
-    if (widget.isParcel) {
-      _socket.trackParcel(widget.tripId);
-      _subs.add(_socket.onParcelDriverLocation.listen(_onDriverLocationUpdate));
-      _subs.add(_socket.onParcelStatus.listen((data) {
-        if (data == null) return;
-        try {
-          _applyParcelStatusEvent(Map<String, dynamic>.from(data));
-        } catch (e, stack) {
-          debugPrint('[SOCKET] Error in onParcelStatus: $e\n$stack');
-        }
-      }));
-      _subs.add(_socket.onParcelCancelled.listen((data) {
-        if (!mounted) return;
-        if (!_eventMatchesTrip(Map<String, dynamic>.from(data))) return;
-        setState(() => _status = 'cancelled');
-        _pollTimer?.cancel();
-        _showStatusBanner('Parcel delivery was cancelled', Colors.red);
-      }));
-      _socket.connect(ApiConfig.socketUrl).then((_) {
-        _socket.trackParcel(widget.tripId);
-        _pollStatus();
-      });
-      return;
-    }
-
     // Eagerly join the trip room
     _socket.trackTrip(widget.tripId);
 
-    _subs.add(_socket.onDriverLocation.listen(_onDriverLocationUpdate));
+    _subs.add(_socket.onDriverLocation.listen((data) {
+      if (!mounted) return;
+      final lat = double.tryParse(data['lat']?.toString() ?? '');
+      final lng = double.tryParse(data['lng']?.toString() ?? '');
+      if (lat != null && lng != null) {
+        _checkArrivingStatus(lat, lng);
+        setState(() {
+          _driverLatLng = LatLng(lat, lng);
+          _updateMapMarkers();
+          _fetchRouteForStatus(); // Keep route updated as driver moves
+        });
+      }
+    }));
 
     _subs.add(_socket.onTripStatus.listen((data) {
       if (data == null) return;
@@ -320,7 +217,6 @@ class _TrackingScreenState extends State<TrackingScreen>
           if (newStatus != 'searching') {
             _stopDispatchRecovery();
           }
-          _statusVersion++; // socket always wins — bump version so pending HTTP polls are ignored
           setState(() {
             _status = newStatus;
 
@@ -355,12 +251,6 @@ class _TrackingScreenState extends State<TrackingScreen>
                   double.tryParse(update['driverLng']?.toString() ?? '');
               if (dLat != null && dLng != null && dLat != 0) {
                 _driverLatLng = LatLng(dLat, dLng);
-                _driverHeading = double.tryParse(
-                      driverMap['heading']?.toString() ??
-                          driverMap['bearing']?.toString() ??
-                          '',
-                    ) ??
-                    _driverHeading;
               }
             }
 
@@ -461,13 +351,7 @@ class _TrackingScreenState extends State<TrackingScreen>
           update['driverVehicleModel'] =
               data['driverVehicleModel'] ?? data['driver_vehicle_model'];
           update['vehicleName'] =
-              data['vehicleName'] ??
-              data['vehicle_name'] ??
-              data['vehicleCategory'] ??
-              data['vehicle_category'] ??
-              _trip?['vehicleCategory'] ??
-              _trip?['vehicleCategoryName'] ??
-              'cab';
+              data['vehicleName'] ?? data['vehicle_name'] ?? 'Pilot';
         }
 
         if (_trip != null) {
@@ -628,22 +512,13 @@ class _TrackingScreenState extends State<TrackingScreen>
     } catch (_) {}
   }
 
-  String _resolveVehicleLabel() {
-    final booked = (_trip?['vehicleCategory'] ??
-            _trip?['vehicleCategoryName'] ??
-            _trip?['vehicleType'] ??
-            _trip?['vehicle_type'] ??
-            '')
-        .toString();
-    final assigned = (_trip?['vehicleName'] ?? _trip?['vehicle_name'] ?? '').toString();
-    if (assigned.isNotEmpty && assigned.toLowerCase() != 'pilot') return assigned;
-    if (booked.isNotEmpty) return booked;
-    return 'cab';
-  }
-
   Future<BitmapDescriptor> _getMarkerIcon(String type,
       {bool isSearching = false}) async {
-    return JagoMapMarkers.vehicle(type, searching: isSearching);
+    final key = "${type}_$isSearching";
+    if (_markerIconCache.containsKey(key)) return _markerIconCache[key]!;
+    final icon = await _drawMarkerIcon(type, isSearching: isSearching);
+    _markerIconCache[key] = icon;
+    return icon;
   }
 
   Future<BitmapDescriptor> _drawMarkerIcon(String type,
@@ -713,47 +588,8 @@ class _TrackingScreenState extends State<TrackingScreen>
     return BitmapDescriptor.bytes(data!.buffer.asUint8List());
   }
 
-  Future<BitmapDescriptor> _destinationMarkerIcon() =>
-      JagoMapMarkers.destination();
-
   void _handleStatusTransition(String newStatus) {
     _restartPollTimer();
-    if (widget.isParcel) {
-      if (newStatus == 'accepted' || newStatus == 'driver_assigned') {
-        _showStatusBanner('Delivery partner assigned', JT.parcelGold);
-        _announceStatus('accepted');
-        _updateMapMarkers();
-      } else if (newStatus == 'picked_up') {
-        _showStatusBanner('Parcel picked up', JT.parcelGoldDark);
-        _updateMapMarkers();
-      } else if (newStatus == 'in_transit') {
-        _animateToDestination();
-        _showStatusBanner('Parcel on the way', JT.parcelGold);
-        _fetchRouteForStatus();
-        _updateMapMarkers();
-      } else if (newStatus == 'completed') {
-        _showStatusBanner('Parcel delivered • Thank you!', JT.parcelGoldDark);
-        setState(() => _polylines.clear());
-        _updateMapMarkers();
-        Future.delayed(const Duration(milliseconds: 800), () {
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => TripCompletionScreen(
-                  trip: _trip ?? {'id': widget.tripId},
-                  walletPendingAmount: _walletPendingAmount,
-                ),
-              ),
-            );
-          }
-        });
-      } else if (newStatus == 'cancelled') {
-        _showStatusBanner('Delivery cancelled', const Color(0xFFDC2626));
-        setState(() => _polylines.clear());
-      }
-      return;
-    }
     if (newStatus == 'accepted' || newStatus == 'driver_assigned') {
       _showStatusBanner('Pilot accepted your ride', JT.primary);
       _announceStatus('accepted');
@@ -781,6 +617,7 @@ class _TrackingScreenState extends State<TrackingScreen>
               builder: (_) => TripCompletionScreen(
                 trip: _trip ?? {'id': widget.tripId},
                 walletPendingAmount: _walletPendingAmount,
+                isParcel: _mode == 'parcel',
               ),
             ),
           );
@@ -896,7 +733,7 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   void _fitMarkersToScreen() {
-    if (_mapController == null || _driverLatLng == null) return;
+    if (_driverLatLng == null) return;
 
     final pLat = double.tryParse(_trip?['pickupLat']?.toString() ?? '') ?? 0.0;
     final pLng = double.tryParse(_trip?['pickupLng']?.toString() ?? '') ?? 0.0;
@@ -922,7 +759,7 @@ class _TrackingScreenState extends State<TrackingScreen>
         math.max(_driverLatLng!.longitude, targetLng),
       ),
     );
-    _mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 120));
+    _mapController.fitBounds(bounds, padding: 120);
   }
 
   void _updateMapMarkers() async {
@@ -938,7 +775,7 @@ class _TrackingScreenState extends State<TrackingScreen>
         icon: await _pickupMarkerIcon(),
         anchor: const Offset(0.5, 0.5),
       ));
-      if (_status == 'searching' && _mapController != null) {
+      if (_status == 'searching') {
         _center = LatLng(pLat, pLng);
       }
     }
@@ -947,18 +784,15 @@ class _TrackingScreenState extends State<TrackingScreen>
     if (_driverLatLng != null &&
         _status != 'searching' &&
         _status != 'cancelled') {
-      final vName = _resolveVehicleLabel();
+      final vName = (_trip?['vehicleName'] ?? 'Pilot').toString();
       newMarkers.add(Marker(
         markerId: const MarkerId('driver'),
         position: _driverLatLng!,
         icon: await _getMarkerIcon(vName),
         anchor: const Offset(0.5, 0.5),
-        rotation: _driverHeading,
-        flat: true,
       ));
       if (_status != 'completed') {
-        _mapController
-            ?.animateCamera(CameraUpdate.newLatLngZoom(_driverLatLng!, 16));
+        _mapController.moveZoom(_driverLatLng!, 16);
       }
     }
 
@@ -978,11 +812,10 @@ class _TrackingScreenState extends State<TrackingScreen>
       newMarkers.add(Marker(
         markerId: const MarkerId('destination'),
         position: LatLng(dLat, dLng),
-        icon: await _destinationMarkerIcon(),
-        anchor: const Offset(0.5, 0.9),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
       ));
 
-      if (_driverLatLng != null && _mapController != null) {
+      if (_driverLatLng != null) {
         final bounds = LatLngBounds(
           southwest: LatLng(
             _driverLatLng!.latitude < dLat ? _driverLatLng!.latitude : dLat,
@@ -993,8 +826,7 @@ class _TrackingScreenState extends State<TrackingScreen>
             _driverLatLng!.longitude > dLng ? _driverLatLng!.longitude : dLng,
           ),
         );
-        _mapController
-            ?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
+        _mapController.fitBounds(bounds, padding: 100);
       }
     }
 
@@ -1012,8 +844,6 @@ class _TrackingScreenState extends State<TrackingScreen>
           position: LatLng(dLat, dLng),
           icon: await _getMarkerIcon(vName, isSearching: true),
           anchor: const Offset(0.5, 0.5),
-          rotation: double.tryParse(d['heading']?.toString() ?? '0') ?? 0,
-          flat: true,
         ));
       }
     }
@@ -1060,34 +890,6 @@ class _TrackingScreenState extends State<TrackingScreen>
     return 12742 * math.asin(math.sqrt(a));
   }
 
-  double _resolveHeading(
-    Map<String, dynamic> data,
-    LatLng? previous,
-    LatLng next,
-  ) {
-    final incoming = double.tryParse(
-      data['heading']?.toString() ?? data['bearing']?.toString() ?? '',
-    );
-    if (incoming != null && incoming.isFinite && incoming != 0) {
-      return incoming;
-    }
-    if (previous == null) return _driverHeading;
-    return _bearingBetween(previous, next);
-  }
-
-  double _bearingBetween(LatLng from, LatLng to) {
-    final fromLat = from.latitude * math.pi / 180;
-    final fromLng = from.longitude * math.pi / 180;
-    final toLat = to.latitude * math.pi / 180;
-    final toLng = to.longitude * math.pi / 180;
-    final deltaLng = toLng - fromLng;
-    final y = math.sin(deltaLng) * math.cos(toLat);
-    final x = math.cos(fromLat) * math.sin(toLat) -
-        math.sin(fromLat) * math.cos(toLat) * math.cos(deltaLng);
-    final bearing = math.atan2(y, x) * 180 / math.pi;
-    return (bearing + 360) % 360;
-  }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1101,10 +903,8 @@ class _TrackingScreenState extends State<TrackingScreen>
     _stopDispatchRecovery();
     _pulseCtrl.dispose();
     _tts.stop();
-    _mapController?.dispose();
-    // Leave the trip socket room — shared singleton stays connected for other trips
-    _socket.stopTrackingTrip(widget.tripId);
-    if (widget.isParcel) _socket.stopTrackingParcel(widget.tripId);
+    _mapController.dispose();
+    // Don't disconnect socket — it's a shared singleton
     super.dispose();
   }
 
@@ -1114,11 +914,7 @@ class _TrackingScreenState extends State<TrackingScreen>
       if (!_socket.isConnected) {
         _socket.connect(ApiConfig.socketUrl);
       }
-      if (widget.isParcel) {
-        _socket.trackParcel(widget.tripId);
-      } else {
-        _socket.trackTrip(widget.tripId);
-      }
+      _socket.trackTrip(widget.tripId);
       _pollStatus();
     }
   }
@@ -1199,21 +995,11 @@ class _TrackingScreenState extends State<TrackingScreen>
     _dispatchRetryTimer?.cancel();
     _searchAbortTimer?.cancel();
     debugPrint('[DISPATCH] Searching for pilot tripId=${widget.tripId}');
-    int _retryCount = 0;
     _dispatchRetryTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!mounted || _status != 'searching') return;
-      _retryCount++;
-      // Exponential back-off: after 4 retries (60s), poll less frequently.
-      // Multiplier: 1,1,1,1,2,2,4,4,8… capped at every 60s tick (4 ticks = 60s gap).
-      final gap = math.min(math.pow(2, math.max(0, _retryCount - 4)).toInt(), 4);
-      if (_retryCount > 4 && _retryCount % gap != 0) return;
       debugPrint(
-          '[DISPATCH] Search retry #$_retryCount: rejoining room and reconciling tripId=${widget.tripId}');
-      if (widget.isParcel) {
-        _socket.trackParcel(widget.tripId);
-      } else {
-        _socket.trackTrip(widget.tripId);
-      }
+          '[DISPATCH] Search retry: rejoining room and reconciling tripId=${widget.tripId}');
+      _socket.trackTrip(widget.tripId);
       _pollStatus();
     });
     _searchAbortTimer = Timer(const Duration(minutes: 5), () {
@@ -1221,13 +1007,8 @@ class _TrackingScreenState extends State<TrackingScreen>
       debugPrint(
           '[DISPATCH] Search timeout: cancelling tripId=${widget.tripId}');
       _showStatusBanner(
-          widget.isParcel
-              ? 'No delivery partner accepted. Please try again.'
-              : 'No pilots accepted the ride. Please try again.',
-          Colors.red);
-      _cancelTrip(widget.isParcel
-          ? 'No delivery partner accepted within 5 minutes'
-          : 'No pilot accepted within 5 minutes');
+          'No pilots accepted the ride. Please try again.', Colors.red);
+      _cancelTrip('No pilot accepted within 5 minutes');
     });
   }
 
@@ -1240,7 +1021,6 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   void _showBookingTimeoutWarning() {
     if (!mounted) return;
-    final accent = widget.isParcel ? JT.parcelGold : JT.primary;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1252,11 +1032,11 @@ class _TrackingScreenState extends State<TrackingScreen>
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.12),
+              color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.timer_outlined,
-                color: accent, size: 22),
+            child: const Icon(Icons.timer_outlined,
+                color: Color(0xFFF59E0B), size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1319,7 +1099,7 @@ class _TrackingScreenState extends State<TrackingScreen>
         Uri.parse(ApiConfig.boostFare(tripId)),
         headers: headers,
         body: jsonEncode({'boostAmount': amount}),
-      ).timeout(const Duration(seconds: 10));
+      );
       if (!mounted) return;
       if (res.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1482,7 +1262,7 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Future<void> _loadCancelReasons() async {
     try {
-      final res = await http.get(Uri.parse(ApiConfig.configs)).timeout(const Duration(seconds: 8));
+      final res = await http.get(Uri.parse(ApiConfig.configs));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final reasons = (data['cancellationReasons'] as List<dynamic>? ?? [])
@@ -1499,9 +1279,7 @@ class _TrackingScreenState extends State<TrackingScreen>
   void _restartPollTimer() {
     _pollTimer?.cancel();
     if (_status == 'completed' || _status == 'cancelled') return;
-    final interval = _status == 'in_progress' ||
-            _status == 'on_the_way' ||
-            _status == 'in_transit'
+    final interval = _status == 'in_progress' || _status == 'on_the_way'
         ? const Duration(seconds: 10)
         : const Duration(seconds: 5);
     _pollTimer = Timer.periodic(interval, (_) => _pollStatus());
@@ -1509,36 +1287,109 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Future<void> _pollStatus() async {
     if (!mounted) return;
-    final versionAtStart = _statusVersion; // capture before any await
+    if (widget.tripId.isEmpty) {
+      _showStatusBanner('Invalid booking ID', Colors.red);
+      return;
+    }
     try {
       final headers = await AuthService.getHeaders();
+      final Uri uri;
+      switch (_mode) {
+        case 'parcel':
+          uri = Uri.parse(ApiConfig.parcelTrack(widget.tripId));
+          break;
+        case 'pool':
+          uri = Uri.parse(ApiConfig.carSharingDriverLocation(widget.tripId));
+          break;
+        case 'outstation':
+          uri = Uri.parse(ApiConfig.outstationPoolTrack(widget.tripId));
+          break;
+        default:
+          uri = Uri.parse('${ApiConfig.trackTrip}/${widget.tripId}');
+      }
       final res = await http
-          .get(
-            Uri.parse(widget.isParcel
-                ? ApiConfig.parcelTrack(widget.tripId)
-                : '${ApiConfig.trackTrip}/${widget.tripId}'),
-            headers: headers,
-          )
+          .get(uri, headers: headers)
           .timeout(const Duration(seconds: 10));
 
       if (!mounted) return;
-      if (_statusVersion != versionAtStart) return; // socket already updated — discard stale poll
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        final Map<String, dynamic>? tripRaw = widget.isParcel
-            ? _normalizeParcelOrder(
-                Map<String, dynamic>.from(data['order'] as Map? ?? {}))
-            : (data['trip'] is Map
-                ? Map<String, dynamic>.from(data['trip'] as Map)
-                : null);
-        if (tripRaw != null && tripRaw.isNotEmpty) {
-          final trip = tripRaw;
-          final rawStatus = trip['currentStatus']?.toString() ?? _status;
+        Map<String, dynamic>? trip = data['trip'] as Map<String, dynamic>?;
+        if (_mode == 'pool' && data['location'] != null) {
+          final loc = Map<String, dynamic>.from(data['location'] as Map);
+          final rawStatus = loc['status']?.toString() ?? 'confirmed';
+          trip = {
+            'id': widget.tripId,
+            'currentStatus': rawStatus == 'cancelled' ? 'cancelled' : (rawStatus == 'completed' ? 'completed' : 'accepted'),
+            'pickupAddress': loc['fromLocation'] ?? loc['from_location'] ?? '',
+            'destinationAddress': loc['toLocation'] ?? loc['to_location'] ?? '',
+            'driverName': loc['driverName'] ?? loc['driver_name'] ?? '',
+            'driverPhone': loc['driverPhone'] ?? loc['driver_phone'] ?? '',
+            'driverLat': loc['lat'],
+            'driverLng': loc['lng'],
+            'vehicleName': loc['vehicleName'] ?? loc['vehicle_name'] ?? '',
+            'tripType': 'pool',
+          };
+        } else if (_mode == 'outstation' && data['booking'] != null) {
+          final booking = Map<String, dynamic>.from(data['booking'] as Map);
+          final rawStatus = booking['status']?.toString() ?? 'confirmed';
+          final mapped = rawStatus == 'picked_up'
+              ? 'in_progress'
+              : rawStatus == 'cancelled'
+                  ? 'cancelled'
+                  : rawStatus == 'completed'
+                      ? 'completed'
+                      : 'accepted';
+          trip = {
+            ...booking,
+            'id': booking['id']?.toString() ?? widget.tripId,
+            'currentStatus': mapped,
+            'pickupAddress': booking['pickupAddress'] ?? booking['fromCity'] ?? booking['from_city'] ?? '',
+            'destinationAddress': booking['dropoffAddress'] ?? booking['toCity'] ?? booking['to_city'] ?? '',
+            'driverName': booking['driverName'] ?? booking['driver_name'] ?? '',
+            'driverPhone': booking['driverPhone'] ?? booking['driver_phone'] ?? '',
+            'driverLat': data['driverLat'] ?? booking['driverLat'] ?? booking['driver_lat'],
+            'driverLng': data['driverLng'] ?? booking['driverLng'] ?? booking['driver_lng'],
+            'estimatedFare': booking['totalFare'] ?? booking['total_fare'],
+            'tripType': 'outstation',
+          };
+        }
+        if (_mode == 'parcel' && data['order'] != null) {
+          final order = Map<String, dynamic>.from(data['order'] as Map);
+          final rawStatus = order['currentStatus']?.toString() ??
+              order['current_status']?.toString() ??
+              'searching';
+          trip = {
+            ...order,
+            'id': order['id']?.toString(),
+            'currentStatus': rawStatus,
+            'tripType': 'parcel',
+            'pickupAddress': order['pickupAddress'] ?? order['pickup_address'],
+            'destinationAddress': order['dropAddress'] ?? order['drop_address'],
+            'driverName': order['driverName'] ?? order['driver_name'],
+            'driverPhone': order['driverPhone'] ?? order['driver_phone'],
+            'driverLat': order['driverLat'] ?? order['driver_lat'],
+            'driverLng': order['driverLng'] ?? order['driver_lng'],
+            'estimatedFare': order['totalFare'] ?? order['total_fare'],
+          };
+        }
+        if (trip != null) {
+          final tripData = Map<String, dynamic>.from(trip);
+          final rawStatus = tripData['currentStatus']?.toString() ?? _status;
           final resolvedStatus =
               rawStatus == 'payment_pending' ? 'completed' : rawStatus;
 
-          final statusRank = _statusRanks();
+          const statusRank = {
+            'searching': 0,
+            'driver_assigned': 1,
+            'accepted': 2,
+            'arrived': 3,
+            'in_progress': 4,
+            'on_the_way': 4,
+            'completed': 5,
+            'cancelled': 5,
+          };
 
           final currentRank = statusRank[_status] ?? 0;
           final incomingRank = statusRank[resolvedStatus] ?? 0;
@@ -1576,22 +1427,22 @@ class _TrackingScreenState extends State<TrackingScreen>
                   'tripType',
                 ];
                 for (var key in criticalKeys) {
-                  if ((trip[key] == null || trip[key].toString().isEmpty) &&
+                  if ((tripData[key] == null || tripData[key].toString().isEmpty) &&
                       (_trip![key] != null &&
                           _trip![key].toString().isNotEmpty)) {
-                    trip[key] = _trip![key];
+                    tripData[key] = _trip![key];
                   }
                 }
               }
 
               final bool statusChanged = _status != resolvedStatus;
-              _trip = trip;
+              _trip = tripData;
               _status = resolvedStatus;
 
               if (resolvedStatus == 'completed') {
                 _walletPendingAmount = double.tryParse(
-                      trip['walletPendingAmount']?.toString() ??
-                          trip['pendingPaymentAmount']?.toString() ??
+                      tripData['walletPendingAmount']?.toString() ??
+                          tripData['pendingPaymentAmount']?.toString() ??
                           '0',
                     ) ??
                     _walletPendingAmount;
@@ -1606,8 +1457,8 @@ class _TrackingScreenState extends State<TrackingScreen>
             });
           }
 
-          final dLat = double.tryParse(trip['driverLat']?.toString() ?? '');
-          final dLng = double.tryParse(trip['driverLng']?.toString() ?? '');
+          final dLat = double.tryParse(tripData['driverLat']?.toString() ?? '');
+          final dLng = double.tryParse(tripData['driverLng']?.toString() ?? '');
           if (dLat != null && dLng != null && dLat != 0) {
             _driverLatLng = LatLng(dLat, dLng);
             _updateMapMarkers();
@@ -1628,37 +1479,41 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Future<void> _cancelTrip(String reason) async {
-    if (widget.isParcel) {
-      _socket.cancelParcel(widget.tripId, reason: reason);
-      try {
-        final headers = await AuthService.getHeaders();
-        await http
-            .post(
-              Uri.parse(ApiConfig.parcelCancel(widget.tripId)),
-              headers: headers,
-              body: jsonEncode({'reason': reason}),
-            )
-            .timeout(const Duration(seconds: 10));
-      } catch (_) {}
-      if (!mounted) return;
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-        (_) => false,
-      );
-      return;
+    if (_isRideMode) {
+      _socket.cancelTrip(_trip?['id']?.toString() ?? widget.tripId);
     }
-
-    // Cancel via socket first
-    _socket.cancelTrip(_trip?['id']?.toString() ?? widget.tripId);
-    // Also HTTP for persistence
     double? walletRefund;
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.post(Uri.parse(ApiConfig.cancelTrip),
-          headers: headers,
-          body: jsonEncode(
-              {'tripId': _trip?['id'] ?? widget.tripId, 'reason': reason})).timeout(const Duration(seconds: 10));
+      final http.Response res;
+      switch (_mode) {
+        case 'parcel':
+          res = await http.post(
+            Uri.parse(ApiConfig.parcelCancel(widget.tripId)),
+            headers: headers,
+            body: jsonEncode({'reason': reason}),
+          );
+          break;
+        case 'pool':
+          res = await http.post(
+            Uri.parse(ApiConfig.carSharingCancelBooking(widget.tripId)),
+            headers: headers,
+            body: jsonEncode({'reason': reason}),
+          );
+          break;
+        case 'outstation':
+          res = await http.post(
+            Uri.parse(ApiConfig.outstationPoolCancelBooking(widget.tripId)),
+            headers: headers,
+            body: jsonEncode({'reason': reason}),
+          );
+          break;
+        default:
+          res = await http.post(Uri.parse(ApiConfig.cancelTrip),
+              headers: headers,
+              body: jsonEncode(
+                  {'tripId': _trip?['id'] ?? widget.tripId, 'reason': reason}));
+      }
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         walletRefund = double.tryParse(data['walletRefund']?.toString() ?? '');
@@ -1789,7 +1644,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                               (_) => false);
                         }
                       },
-                      child: JT.logoBlue(height: 56),
+                      child: JT.logoBlue(height: 32),
                     ),
                     Row(
                       children: [
@@ -1812,10 +1667,11 @@ class _TrackingScreenState extends State<TrackingScreen>
                 child: ClipRRect(
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
                   child: Stack(children: [
-                    GoogleMap(
+                    Positioned.fill(
+                      child: JagoMapView(
+                      controller: _mapController,
                       initialCameraPosition: CameraPosition(target: _center, zoom: 15),
-                      onMapCreated: (c) {
-                        _mapController = c;
+                      onMapCreated: (_) {
                         if (_driverLatLng != null) {
                           _updateMapMarkers();
                           _fetchRouteForStatus();
@@ -1838,9 +1694,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                             strokeWidth: 2,
                           ),
                       },
-                      myLocationEnabled: true,
-                      zoomControlsEnabled: false,
-                      mapToolbarEnabled: false,
+                    ),
                     ),
                     Positioned(
                       bottom: 0,
@@ -1885,6 +1739,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                                             vehicleNum: trip?['driverVehicleNumber'] ?? '',
                                             vehicleModel: trip?['driverVehicleModel'] ?? '',
                                             phone: driverPhone,
+                                            vehicleType: trip?['vehicleName'],
                                           )
                                         else
                                           const Center(
@@ -1990,7 +1845,7 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Future<String> _getSupportPhone() async {
     try {
-      final r = await http.get(Uri.parse(ApiConfig.configs)).timeout(const Duration(seconds: 5));
+      final r = await http.get(Uri.parse(ApiConfig.configs));
       if (r.statusCode == 200) {
         final data = jsonDecode(r.body);
         return data['configs']?['support_phone'] ?? '+916303000000';
@@ -2003,8 +1858,6 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Widget _buildPremiumHeader(Map<String, dynamic> statusInfo, String? otp) {
     final color = statusInfo['color'] as Color;
-    final accent = widget.isParcel ? JT.parcelGold : const Color(0xFF10B981);
-    final pinAccent = widget.isParcel ? JT.parcelGold : JT.primary;
     final showOtp = otp != null &&
         otp.isNotEmpty &&
         (_status == 'driver_assigned' ||
@@ -2080,11 +1933,11 @@ class _TrackingScreenState extends State<TrackingScreen>
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: pinAccent.withValues(alpha: 0.1),
+                          color: const Color(0xFF6366F1).withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(Icons.stars_rounded,
-                            color: pinAccent, size: 18),
+                        child: const Icon(Icons.stars_rounded,
+                            color: Color(0xFF6366F1), size: 18),
                       ),
                       const SizedBox(width: 12),
                       Column(
@@ -2123,11 +1976,11 @@ class _TrackingScreenState extends State<TrackingScreen>
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: accent.withValues(alpha: 0.1),
+                          color: const Color(0xFF10B981).withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(Icons.timer_rounded,
-                            color: accent, size: 18),
+                        child: const Icon(Icons.timer_rounded,
+                            color: Color(0xFF10B981), size: 18),
                       ),
                       const SizedBox(width: 12),
                       Column(
@@ -2163,6 +2016,7 @@ class _TrackingScreenState extends State<TrackingScreen>
     required String vehicleNum,
     required String vehicleModel,
     required String? phone,
+    String? vehicleType,
   }) {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -2272,6 +2126,14 @@ class _TrackingScreenState extends State<TrackingScreen>
                       fontSize: 10,
                       color: Colors.blue,
                       fontWeight: FontWeight.w500)),
+              if (vehicleType != null && vehicleType.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                VehicleArtwork(
+                  vehicleKey: vehicleType,
+                  width: 36,
+                  height: 36,
+                ),
+              ],
             ],
           ),
         ],
@@ -2346,7 +2208,6 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Widget _buildSearchingView(Map<String, dynamic>? trip, dynamic actualFare, dynamic estimatedFare) {
-    final liveColor = widget.isParcel ? JT.parcelGold : JT.primary;
     final fareVal = actualFare ?? estimatedFare ?? '--';
     final dist = trip?['estimatedDistance'] ?? trip?['estimated_distance'] ?? '--';
     final duration = trip?['estimatedDurationMinutes'] ?? trip?['estimated_duration'] ?? trip?['etaMinutes'] ?? '--';
@@ -2378,7 +2239,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                   style: GoogleFonts.poppins(
                     fontSize: 26,
                     fontWeight: FontWeight.w800,
-                    color: liveColor,
+                    color: const Color(0xFF2C95F1),
                     height: 1.0,
                   ),
                 ),
@@ -2402,7 +2263,7 @@ class _TrackingScreenState extends State<TrackingScreen>
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: liveColor.withValues(alpha: 0.3)),
+            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -2410,8 +2271,8 @@ class _TrackingScreenState extends State<TrackingScreen>
               Container(
                 width: 8,
                 height: 8,
-                decoration: BoxDecoration(
-                  color: liveColor,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF10B981),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -2421,7 +2282,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                 style: GoogleFonts.poppins(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: liveColor,
+                  color: const Color(0xFF10B981),
                 ),
               ),
               const SizedBox(width: 6),
@@ -2447,9 +2308,9 @@ class _TrackingScreenState extends State<TrackingScreen>
         const SizedBox(height: 16),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            backgroundColor: const Color(0xFFF1F5F9),
-            valueColor: AlwaysStoppedAnimation<Color>(liveColor),
+          child: const LinearProgressIndicator(
+            backgroundColor: Color(0xFFF1F5F9),
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2C95F1)),
             minHeight: 4,
           ),
         ),
@@ -2488,26 +2349,24 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Widget _buildTripDetailPill(IconData icon, String text) {
-    final accent = widget.isParcel ? JT.parcelGold : JT.primary;
-    final bg = widget.isParcel ? JT.parcelGoldSoft : JT.primaryLight;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: bg,
+        color: const Color(0xFFF0F7FF),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accent.withValues(alpha: 0.2)),
+        border: Border.all(color: const Color(0xFF2C95F1).withValues(alpha: 0.2)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: accent),
+          Icon(icon, size: 16, color: const Color(0xFF2C95F1)),
           const SizedBox(width: 6),
           Text(
             text,
             style: GoogleFonts.poppins(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: widget.isParcel ? JT.parcelGoldDark : JT.primaryDark,
+              color: const Color(0xFF1E40AF),
             ),
           ),
         ],
@@ -2598,7 +2457,7 @@ class _TrackingScreenState extends State<TrackingScreen>
             'lat': _center.latitude,
             'lng': _center.longitude,
             'message': 'Customer SOS alert during trip',
-          })).timeout(const Duration(seconds: 10));
+          }));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('🚨 SOS Alert sent! Help is on the way.',
@@ -2622,11 +2481,10 @@ class _TrackingScreenState extends State<TrackingScreen>
     final fareVal = actualFare ?? estimatedFare;
     final dist = trip['estimatedDistance'] ?? trip['estimated_distance'];
     final vehicle = trip['vehicleName'] ?? trip['vehicle_name'];
-    final fareColor = widget.isParcel ? JT.parcelGold : const Color(0xFF10B981);
     return Wrap(spacing: 8, children: [
       if (fareVal != null)
         _chip(
-            Icons.currency_rupee_rounded, '₹$fareVal', fareColor),
+            Icons.currency_rupee_rounded, '₹$fareVal', const Color(0xFF10B981)),
       if (dist != null)
         _chip(Icons.route_rounded, '$dist km', const Color(0xFF6B7280)),
       if (vehicle != null)
@@ -2678,55 +2536,6 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Map<String, dynamic> _getStatusInfo(String status) {
-    if (widget.isParcel) {
-      switch (status) {
-        case 'searching':
-        case 'pending':
-          return {
-            'label': 'Finding a delivery partner...',
-            'icon': Icons.radar_rounded,
-            'color': JT.parcelGold,
-          };
-        case 'driver_assigned':
-        case 'accepted':
-          return {
-            'label': 'Partner assigned — heading to pickup',
-            'icon': Icons.local_shipping_rounded,
-            'color': JT.parcelGold,
-          };
-        case 'picked_up':
-          return {
-            'label': 'Parcel picked up',
-            'icon': Icons.inventory_2_rounded,
-            'color': JT.parcelGoldDark,
-          };
-        case 'in_transit':
-          return {
-            'label': 'Parcel on the way',
-            'icon': Icons.navigation_rounded,
-            'color': JT.parcelGold,
-          };
-        case 'completed':
-          return {
-            'label': 'Parcel delivered',
-            'icon': Icons.check_circle_rounded,
-            'color': JT.parcelGoldDark,
-          };
-        case 'cancelled':
-          return {
-            'label': 'Delivery cancelled',
-            'icon': Icons.cancel_rounded,
-            'color': JT.parcelGoldDark,
-          };
-        default:
-          return {
-            'label': 'Tracking your parcel...',
-            'icon': Icons.hourglass_empty_rounded,
-            'color': const Color(0xFF94A3B8),
-          };
-      }
-    }
-
     switch (status) {
       case 'searching':
         return {
@@ -2795,14 +2604,9 @@ class _TrackingScreenState extends State<TrackingScreen>
         if (dLat != null &&
             dLng != null &&
             dLat != 0 &&
-            dLng != 0 &&
-            _mapController != null) {
+            dLng != 0) {
           debugPrint('[MAP] Animating to destination: $dLat, $dLng');
-          _mapController!
-              .animateCamera(CameraUpdate.newLatLngZoom(LatLng(dLat, dLng), 15))
-              .catchError((e) {
-            debugPrint('[MAP] Camera animation failed: $e');
-          });
+          _mapController.moveZoom(LatLng(dLat, dLng), 15);
         }
       } catch (e) {
         debugPrint('[MAP] Error in _animateToDestination: $e');
@@ -2877,9 +2681,7 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   void _showArrivalBanner() {
-    _showStatusBanner(
-        'Your pilot is arrived',
-        widget.isParcel ? JT.parcelGold : const Color(0xFF10B981));
+    _showStatusBanner('Your pilot is arrived', const Color(0xFF10B981));
   }
 
   Widget _buildInProgressPanel(Map<String, dynamic> trip) {
@@ -3043,14 +2845,14 @@ class _TrackingScreenState extends State<TrackingScreen>
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: isSelected
             ? BoxDecoration(
-                gradient: widget.isParcel ? JT.parcelGrad : JT.grad,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF2C95F1), Color(0xFF6366F1)], 
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
-                  BoxShadow(
-                      color: (widget.isParcel ? JT.parcelGold : JT.primary)
-                          .withValues(alpha: 0.3),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4)),
+                  BoxShadow(color: const Color(0xFF2C95F1).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
                 ],
               )
             : null,

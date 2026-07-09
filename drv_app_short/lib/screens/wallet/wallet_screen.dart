@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
+import '../../services/api_retry.dart';
 import '../../services/auth_service.dart';
 
 class WalletScreen extends StatefulWidget {
@@ -247,18 +247,7 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
     );
   }
 
-  static String _generateIdempotencyKey() {
-    final rnd = Random.secure();
-    final bytes = List.generate(16, (_) => rnd.nextInt(256));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    String hex(int b) => b.toRadixString(16).padLeft(2, '0');
-    return '${bytes.sublist(0, 4).map(hex).join()}-'
-        '${bytes.sublist(4, 6).map(hex).join()}-'
-        '${bytes.sublist(6, 8).map(hex).join()}-'
-        '${bytes.sublist(8, 10).map(hex).join()}-'
-        '${bytes.sublist(10).map(hex).join()}';
-  }
+  static String _generateIdempotencyKey() => generateIdempotencyKey();
 
   Future<void> _initiateRecharge(double amount) async {
     try {

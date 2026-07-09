@@ -32,8 +32,8 @@ class VehicleStatusService {
   static const List<VehicleStatus> fallbackStatuses = [
     VehicleStatus(key: 'bike', name: 'Bike', active: true),
     VehicleStatus(key: 'auto', name: 'Auto', active: true),
-    VehicleStatus(key: 'cab', name: 'Cab', active: false),
-    VehicleStatus(key: 'premium', name: 'Premium', active: false),
+    VehicleStatus(key: 'cab', name: 'Cab', active: true),
+    VehicleStatus(key: 'premium', name: 'Premium', active: true),
   ];
 
   Stream<Map<String, VehicleStatus>> watchVehicleStatuses() async* {

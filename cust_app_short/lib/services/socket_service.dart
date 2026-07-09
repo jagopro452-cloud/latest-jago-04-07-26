@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'secure_token_store.dart';
+import 'auth_service.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
@@ -224,10 +225,15 @@ class SocketService {
 
     _socket!.on('auth:error', (data) {
       debugPrint('[SOCKET] Auth error received');
-      // If we get an auth error, we might need to refresh the token or re-login.
-      // For now, let's just push a disconnected state.
       _isConnected = false;
       _connectedController.add(false);
+    });
+
+    // Admin force-logout: account banned/suspended — log out immediately.
+    _socket!.on('system:force_logout', (data) {
+      final reason = (data is Map ? data['reason'] : null) ?? 'Account suspended';
+      debugPrint('[SOCKET] system:force_logout received: $reason');
+      AuthService.handle401();
     });
 
     // Driver assigned to my trip (socket acceptance path)

@@ -1,7 +1,10 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart' as fmap;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:latlong2/latlong.dart' as ll;
 
 import '../config/jago_theme.dart';
 
@@ -319,6 +322,210 @@ class _VehicleSpec {
       cacheKey: 'cab${badge.name}',
       icon: Icons.directions_car_rounded,
       badge: badge,
+    );
+  }
+}
+
+class JagoMapController {
+  fmap.MapController? _inner;
+  void attach(fmap.MapController map) => _inner = map;
+  void move(LatLng target, {double? zoom}) {
+    final m = _inner;
+    if (m == null) return;
+    m.move(ll.LatLng(target.latitude, target.longitude), zoom ?? m.camera.zoom);
+  }
+  void moveZoom(LatLng target, double zoom) {
+    _inner?.move(ll.LatLng(target.latitude, target.longitude), zoom);
+  }
+  void fitBounds(LatLngBounds bounds, {double padding = 48}) {
+    _inner?.fitCamera(fmap.CameraFit.bounds(
+      bounds: fmap.LatLngBounds(
+        ll.LatLng(bounds.southwest.latitude, bounds.southwest.longitude),
+        ll.LatLng(bounds.northeast.latitude, bounds.northeast.longitude),
+      ),
+      padding: EdgeInsets.all(padding),
+    ));
+  }
+  void dispose() {}
+}
+
+class _MapPin extends StatelessWidget {
+  final Color color;
+  final String? label;
+  const _MapPin({required this.color, this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (label != null && label!.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(bottom: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(4),
+              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+            ),
+            child: Text(
+              label!,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        Icon(
+          Icons.location_on_rounded,
+          color: color,
+          size: 36,
+          shadows: const [
+            Shadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+          ],
+        ),
+      ],
+    ),
+    );
+  }
+}
+
+class JagoMapView extends StatefulWidget {
+  final CameraPosition initialCameraPosition;
+  final Set<Marker> markers;
+  final Set<Polyline> polylines;
+  final Set<Circle> circles;
+  final EdgeInsets padding;
+  final JagoMapController? controller;
+  final String userAgentPackage;
+  final void Function(JagoMapController controller)? onMapCreated;
+  final void Function(CameraPosition position)? onCameraMove;
+  final void Function()? onCameraIdle;
+  const JagoMapView({
+    super.key,
+    required this.initialCameraPosition,
+    this.markers = const {},
+    this.polylines = const {},
+    this.circles = const {},
+    this.padding = EdgeInsets.zero,
+    this.controller,
+    this.userAgentPackage = 'com.mindwhile.jago_pilot',
+    this.onMapCreated,
+    this.onCameraMove,
+    this.onCameraIdle,
+  });
+  @override
+  State<JagoMapView> createState() => _JagoMapViewState();
+}
+
+class _JagoMapViewState extends State<JagoMapView> {
+  late final fmap.MapController _mapController;
+  late final JagoMapController _jagoController;
+  @override
+  void initState() {
+    super.initState();
+    _mapController = fmap.MapController();
+    _jagoController = widget.controller ?? JagoMapController();
+    _jagoController.attach(_mapController);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onMapCreated?.call(_jagoController);
+    });
+  }
+  ll.LatLng _ll(LatLng p) => ll.LatLng(p.latitude, p.longitude);
+  Color _markerColor(Marker m) {
+    final id = m.markerId.value.toLowerCase();
+    if (id.contains('pickup') || id == 'p' || id.contains('driver_location')) {
+      return JT.primary;
+    }
+    if (id.contains('dest') || id == 'd' || id.contains('drop')) {
+      return const Color(0xFFEF4444);
+    }
+    if (id.contains('driver')) return const Color(0xFF1A6FDB);
+    return JT.primary;
+  }
+  String? _markerLabel(Marker m) {
+    final id = m.markerId.value.toLowerCase();
+    if (id == 'p' || id.contains('pickup')) return 'PICKUP';
+    if (id == 'd' || id.contains('dest') || id.contains('drop')) return 'DROP';
+    return null;
+  }
+  Widget _markerWidget(Marker m) {
+    final id = m.markerId.value.toLowerCase();
+    if (id.contains('driver_location') || (id.contains('driver') && m.flat)) {
+      return Transform.rotate(
+        angle: m.rotation * math.pi / 180,
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A6FDB),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
+          ),
+          child: const Icon(Icons.navigation_rounded, color: Colors.white, size: 20),
+        ),
+      );
+    }
+    return _MapPin(color: _markerColor(m), label: _markerLabel(m));
+  }
+  @override
+  Widget build(BuildContext context) {
+    final center = _ll(widget.initialCameraPosition.target);
+    return SizedBox.expand(
+      child: fmap.FlutterMap(
+        mapController: _mapController,
+        options: fmap.MapOptions(
+          initialCenter: center,
+          initialZoom: widget.initialCameraPosition.zoom,
+          interactionOptions: const fmap.InteractionOptions(
+            flags: fmap.InteractiveFlag.all,
+          ),
+          onPositionChanged: (pos, _) {
+            widget.onCameraMove?.call(CameraPosition(
+              target: LatLng(pos.center.latitude, pos.center.longitude),
+              zoom: pos.zoom,
+            ));
+          },
+          onMapEvent: (event) {
+            if (event is fmap.MapEventMoveEnd) widget.onCameraIdle?.call();
+          },
+        ),
+        children: [
+          fmap.TileLayer(
+            urlTemplate:
+                'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+            subdomains: const ['a', 'b', 'c', 'd'],
+            userAgentPackageName: widget.userAgentPackage,
+            maxZoom: 20,
+          ),
+          if (widget.circles.isNotEmpty)
+            fmap.CircleLayer(circles: widget.circles.map((c) => fmap.CircleMarker(
+              point: _ll(c.center),
+              radius: c.radius,
+              color: c.fillColor ?? JT.primary.withValues(alpha: 0.08),
+              borderColor: c.strokeColor ?? JT.primary.withValues(alpha: 0.35),
+              borderStrokeWidth: c.strokeWidth.toDouble(),
+            )).toList()),
+          if (widget.polylines.isNotEmpty)
+            fmap.PolylineLayer(polylines: widget.polylines.map((p) => fmap.Polyline(
+              points: p.points.map(_ll).toList(),
+              color: p.color,
+              strokeWidth: p.width.toDouble(),
+            )).toList()),
+          if (widget.markers.isNotEmpty)
+            fmap.MarkerLayer(markers: widget.markers.map((m) => fmap.Marker(
+              point: _ll(m.position),
+              width: 56,
+              height: 64,
+              alignment: Alignment.bottomCenter,
+              child: _markerWidget(m),
+            )).toList()),
+        ],
+      ),
     );
   }
 }

@@ -1,10 +1,10 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../config/jago_theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../config/api_config.dart';
+import '../../services/api_retry.dart';
 import '../../services/auth_service.dart';
 import '../home/home_screen.dart';
 
@@ -316,11 +316,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     );
   }
 
-  String _generateIdempotencyKey() {
-    final rng = Random.secure();
-    final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
-    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-  }
+  String _generateIdempotencyKey() => generateIdempotencyKey();
 
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
     // Generate idempotency key once — reused across all retry attempts so the

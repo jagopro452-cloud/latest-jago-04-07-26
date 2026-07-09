@@ -23,7 +23,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final headers = await AuthService.getHeaders();
-    final res = await http.get(Uri.parse(ApiConfig.emergencyContacts), headers: headers).timeout(const Duration(seconds: 8));
+    final res = await http.get(Uri.parse(ApiConfig.emergencyContacts), headers: headers);
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
       if (mounted) setState(() { _contacts = data['contacts'] ?? []; _loading = false; });
@@ -65,7 +65,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
                 Navigator.pop(ctx);
                 final headers = await AuthService.getHeaders();
                 await http.post(Uri.parse(ApiConfig.emergencyContacts), headers: headers,
-                  body: jsonEncode({'name': nameCtrl.text, 'phone': phoneCtrl.text, 'relation': relation})).timeout(const Duration(seconds: 10));
+                  body: jsonEncode({'name': nameCtrl.text, 'phone': phoneCtrl.text, 'relation': relation}));
                 if (mounted) _load();
               },
               child: const Text('Add Contact'),
@@ -78,7 +78,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
 
   Future<void> _delete(int id) async {
     final headers = await AuthService.getHeaders();
-    await http.delete(Uri.parse('${ApiConfig.emergencyContacts}/$id'), headers: headers).timeout(const Duration(seconds: 8));
+    await http.delete(Uri.parse('${ApiConfig.emergencyContacts}/$id'), headers: headers);
     if (mounted) _load();
   }
 

@@ -2,13 +2,14 @@ class ApiConfig {
   // Override at compile time:  --dart-define=API_BASE_URL=https://yourdomain.com
   static const String compileTimeBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
 
-  // Final production backend/app host. Do not point mobile apps at staging.
-  static const String _prodUrl = 'http://15.207.65.184:5000';
+  // Final production backend — HTTPS via jagopro.org (nginx terminates TLS)
+  static const String _prodUrl = 'https://jagopro.org';
 
   // For Android Emulator use 10.0.2.2. For Physical Device use your PC's IP (e.g. 192.168.0.x)
-  static const String _lanDevUrl = 'http://192.168.1.6:5000'; // Target specific physical IP
+  static const String _lanDevUrl = 'http://192.168.1.6:5000';
 
-  static bool _isProd = true; // Production: use live DO backend
+  static bool _isProd = true;
+  static String? _runtimeMapsAndroidKey;
 
   static String get baseUrl {
     if (compileTimeBaseUrl.isNotEmpty) {
@@ -17,13 +18,26 @@ class ApiConfig {
     }
     return _isProd ? _prodUrl : _lanDevUrl;
   }
+
+  /// Android Maps SDK key — from --dart-define or /api/app/configs (never hardcoded).
+  static String get googleMapsAndroidKey {
+    if (googleMapsAndroidKeyEnv.isNotEmpty) return googleMapsAndroidKeyEnv;
+    return _runtimeMapsAndroidKey ?? '';
+  }
+
+  static void setRuntimeMapsAndroidKey(String? key) {
+    final k = key?.trim() ?? '';
+    if (k.isNotEmpty) _runtimeMapsAndroidKey = k;
+  }
+
+  static const String googleMapsAndroidKeyEnv = String.fromEnvironment('GOOGLE_MAPS_ANDROID_KEY', defaultValue: '');
+
+  /// Deprecated: use server-side routing APIs only. Kept for compile compatibility.
+  static const String googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_KEY', defaultValue: '');
+
   static bool get isDev => !_isProd;
   static void useProduction() => _isProd = true;
   static void useDevelopment() => _isProd = false;
-
-  // Set at build time: --dart-define=GOOGLE_MAPS_KEY=AIzaSy...
-  // Never hardcode — key must be rotated in Google Cloud Console
-  static const String googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_KEY', defaultValue: 'AIzaSyAiMVYA_ppxeT344tkcoSsjeGGMaPU26eI');
 
   // Socket.IO base URL (same server, no path)
   static String get socketUrl => baseUrl;
@@ -44,6 +58,7 @@ class ApiConfig {
   static String get customerProfile => '$baseUrl/api/app/customer/profile';
   static String get customerHomeData => '$baseUrl/api/app/customer/home-data';
   static String get estimateFare => '$baseUrl/api/app/customer/estimate-fare';
+  static String get vehicleCategories => '$baseUrl/api/app/vehicle-categories';
   static String get bookRide => '$baseUrl/api/app/customer/book-ride';
   static String get activeTrip => '$baseUrl/api/app/customer/active-trip';
   static String get activeBooking => '$baseUrl/api/app/customer/active-booking';
@@ -101,6 +116,8 @@ class ApiConfig {
 
   // ── Mapping / Geocoding (proxied through server — avoids Android key restriction) ──
   static String get reverseGeocode => '$baseUrl/api/app/reverse-geocode';
+  static String geocode(String address) =>
+      '$baseUrl/api/app/geocode?address=${Uri.encodeComponent(address)}';
   static String get placesAutocomplete => '$baseUrl/api/app/places/autocomplete';
   static String get placeDetails => '$baseUrl/api/app/places/details';
   static String get placesNearby => '$baseUrl/api/app/places/nearby';
@@ -129,6 +146,8 @@ class ApiConfig {
   static String get outstationPoolBookings => '$baseUrl/api/app/customer/outstation-pool/bookings';
   static String outstationPoolCancelBooking(String bookingId) =>
       '$baseUrl/api/app/customer/outstation-pool/bookings/$bookingId/cancel';
+  static String outstationPoolTrack(String bookingId) =>
+      '$baseUrl/api/app/customer/outstation-pool/bookings/$bookingId/track';
 
   // ── Local Pool (City Car Sharing) ─────────────────────────────────────
   static String get carSharingRides => '$baseUrl/api/app/customer/car-sharing/rides';

@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../../widgets/jago_map_markers.dart';
 import 'package:http/http.dart' as http;
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shimmer/shimmer.dart';
@@ -11,11 +12,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
-import '../../widgets/vehicle_artwork.dart';
 import '../../services/analytics_service.dart';
 import '../../services/api_retry.dart';
 import '../../services/auth_service.dart';
+import '../../services/booking_trace.dart';
 import '../../services/vehicle_status_service.dart';
+import '../../widgets/vehicle_artwork.dart';
 import '../tracking/tracking_screen.dart';
 import 'ride_for_whom_screen.dart';
 
@@ -41,11 +43,11 @@ class BookingScreen extends StatefulWidget {
 }
 
 class _BookingScreenState extends State<BookingScreen> with TickerProviderStateMixin {
-  GoogleMapController? _mapController;
+  final JagoMapController _mapController = JagoMapController();
   bool _loading = false;
   bool _estimating = true;
-  bool _usingFallbackFares = false;
   List<Map<String, dynamic>> _allFares = [];
+  List<Map<String, dynamic>> _vehicleCategoriesCache = [];
   int _selectedFareIndex = 0;
   String _paymentMethod = 'cash';
   double _walletBalance = 0;
@@ -53,18 +55,13 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   final VehicleStatusService _vehicleStatusService = VehicleStatusService();
   String? _appliedPromo;
   double _promoDiscount = 0;
-  double _autoDiscountAmount = 0;
-  String? _autoDiscountName;
   bool _promoLoading = false;
   String? _promoError;
   Timer? _debounce;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
 
   late Razorpay _razorpay;
-
-  String? _pendingBookingIntentId;
-  String? _pendingRazorpayPaymentId;
-  String? _paidBookIdempotencyKey;
-  bool _paymentVerifiedPendingBook = false;
 
   bool _bookForSomeone = false;
   final _passengerNameCtrl = TextEditingController();
@@ -89,10 +86,6 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     {'name': 'Patamata', 'lat': 16.4883, 'lng': 80.6681},
   ];
 
-  static const Color _jagoPrimary = JT.primary;
-  Color get _moduleAccent => _isParcel ? JT.parcelGold : JT.primary;
-  static const Color _jagoSecondary = JT.secondary;
-
   static const Color _blue = JT.primary;
   static const Color _green = JT.success;
 
@@ -103,7 +96,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
 
   Map<String, dynamic>? get _fare => _allFares.isNotEmpty ? _allFares[_selectedFareIndex] : null;
 
-  String get _vehicleName => _fare?['vehicleCategoryName']?.toString() ?? _fare?['name']?.toString() ?? widget.vehicleCategoryName ?? 'Bike';
+  String get _vehicleName => _fareVehicleName(_fare ?? const <String, dynamic>{});
 
   String _fareVehicleName(Map<String, dynamic> fare) {
     return fare['vehicleCategoryName']?.toString() ??
@@ -184,58 +177,30 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   static bool _shouldHideVehicle(String name) {
     final n = name.toLowerCase();
     
-    // Whitelist ride categories: bike, auto, cab, premium, sedan, suv, car
+    // Whitelist only requested categories: bike, auto, cab, premium
+    // Relaxed contains checks to avoid hiding valid variations (e.g. "Bike - Fast")
     if (n.contains('bike')) return false;
     if (n.contains('auto')) return false;
     if (n.contains('cab')) return false;
     if (n.contains('premium')) return false;
     if (n.contains('sedan')) return false;
-    if (n.contains('suv')) return false;
+    if (n.contains('suv') || n.contains(' xl')) return false;
+    if (n.contains('mini')) return false;
     if (n.contains('car')) return false;
 
-    // Hide parcel, pool, cargo, and other non-ride categories
+    // Hide everything else (Parcel, Pool, etc.)
     return true;
   }
 
-  Color _accentForVehicle(String name) {
-    final n = name.toLowerCase();
-    if (_isParcel || n.contains('parcel') || n.contains('cargo')) {
-      return JT.parcelGold;
-    }
-    return JT.primary;
+  static Color _accentForVehicle(String name) {
+    return const Color(0xFF2C95F1); // Unified Premium Indigo
   }
 
-  // ── Vehicle image URLs (real vehicle images, network with emoji fallback) ──
-  // Matches the premium Cloudinary assets used in home_screen.dart
-  static final Map<String, String> _vehicleImageUrls = {
-    'bike': 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775123974/bike_logo_g7idrq.png',
-    'auto': 'https://res.cloudinary.com/kits/image/upload/q_auto/f_auto/v1775125550/ChatGPT_Image_Apr_2_2026_03_55_30_PM_ywb7fj.png',
-    'cab': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_27_28_AM_w0rcnh',
-    'premium': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_31_05_AM_kavp5e',
-    'parcel_bike': 'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_49_26_AM_gjbrxs',
-    'mini_truck':  'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_51_59_AM_jzd119',
-    'pickup_van':  'https://res.cloudinary.com/dg5ct7fys/image/upload/f_auto,q_auto/ChatGPT_Image_Apr_17_2026_11_54_02_AM_hicx7s',
-  };
+  // ── Vehicle artwork via VehicleArtwork (admin icon + app PNG + local SVG) ──
 
-  static String? _vehicleImageKey(String name) {
-    final n = name.toLowerCase();
-    if (n.contains('premium')) return 'premium';
-    if (n.contains('pickup van') || n.contains('pickup')) return 'pickup_van';
-    if (n.contains('mini truck') || n.contains('tata ace')) return 'mini_truck';
-    if (n.contains('parcel bike') || n.contains('bike parcel')) return 'parcel_bike';
-    if (n.contains('parcel auto')) return 'parcel_auto';
-    if (n.contains('parcel')) return 'parcel_bike';
-    if (n.contains('bike')) return 'bike';
-    if (n.contains('auto')) return 'auto';
-    if (n.contains('cab') || n.contains('car') || n.contains('suv')) return 'cab';
-    return null;
-  }
+  static String? _vehicleImageKey(String name) => VehicleArtwork.normalizeKey(name);
 
-  /// Renders vehicle artwork — real network image with icon fallback.
-  Widget _buildVehicleArtwork(String name, Color accent, bool isSelected, {double size = 96}) {
-    final imageKey = _vehicleImageKey(name);
-    final rawUrl = imageKey != null ? _vehicleImageUrls[imageKey] : null;
-    final imageUrl = (rawUrl != null && rawUrl.startsWith('http')) ? rawUrl : null;
+  Widget _buildVehicleArtwork(String name, Color accent, bool isSelected, {double size = 96, String? adminIcon}) {
     final icon = _iconForVehicle(name);
     final isParcel = widget.category == 'parcel';
 
@@ -248,18 +213,16 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           topLeft: Radius.circular(14), bottomLeft: Radius.circular(14)),
       ),
       child: Stack(alignment: Alignment.center, children: [
-        // Vehicle image (real) with icon fallback
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 18),
           child: VehicleArtwork(
-            vehicleKey: imageKey ?? name,
-            networkUrl: imageUrl,
-            height: size * 0.72,
+            vehicleKey: name,
+            adminIcon: adminIcon,
             width: size * 0.72,
-            tint: accent.withValues(alpha: isSelected ? 0.95 : 0.75),
+            height: size * 0.72,
+            tint: accent.withValues(alpha: isSelected ? 0.85 : 0.60),
           ),
         ),
-        // DELIVERY / RIDE badge at bottom
         Positioned(
           bottom: 5,
           child: Container(
@@ -285,9 +248,9 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     final name = fare['vehicleCategoryName']?.toString() ?? fare['name']?.toString() ?? 'Bike';
     final emoji = _emojiForVehicle(name);
     final accent = _accentForVehicle(name);
-    final fareVal = double.tryParse(fare['estimatedFare']?.toString() ?? '0') ?? 0.0;
-    final rawMin = double.tryParse(fare['fareMin']?.toString() ?? '') ?? (fareVal * 0.95);
-    final rawMax = double.tryParse(fare['fareMax']?.toString() ?? '') ?? (fareVal * 1.05);
+    final fareVal = (fare['estimatedFare'] ?? 0).toDouble();
+    final rawMin = (fare['fareMin'] ?? (fareVal * 0.95)).toDouble();
+    final rawMax = (fare['fareMax'] ?? (fareVal * 1.05)).toDouble();
     final displayMin = (rawMin - _promoDiscount).clamp(0.0, double.infinity);
     final displayMax = (rawMax - _promoDiscount).clamp(0.0, double.infinity);
     return AnimatedSwitcher(
@@ -328,25 +291,20 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             const SizedBox(height: 4),
             Text('₹${displayMin.floor()} – ₹${displayMax.ceil()}',
               style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w400)),
-            Text(_usingFallbackFares ? 'offline estimate · may vary' : 'estimated fare',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11)),
+            Text('estimated fare', style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11)),
           ])),
           // Real vehicle image — emoji fallback if network fails
           Builder(builder: (_) {
-            final imgKey = _vehicleImageKey(name);
-            final imgUrl = imgKey != null ? _vehicleImageUrls[imgKey] : null;
+            final adminIcon = fare['vehicleIcon']?.toString() ?? fare['icon']?.toString();
             return SizedBox(
               width: 100, height: 80,
-              child: imgUrl != null
-                ? Image.network(
-                    imgUrl,
-                    fit: BoxFit.contain,
-                    color: Colors.white.withValues(alpha: 0.92),
-                    colorBlendMode: BlendMode.modulate,
-                    errorBuilder: (_, __, ___) =>
-                        Text(emoji, style: const TextStyle(fontSize: 64)),
-                  )
-                : Text(emoji, style: const TextStyle(fontSize: 64)),
+              child: VehicleArtwork(
+                vehicleKey: name,
+                adminIcon: adminIcon,
+                width: 100,
+                height: 80,
+                tint: Colors.white.withValues(alpha: 0.92),
+              ),
             );
           }),
         ]),
@@ -429,29 +387,127 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   }
 
   double get _finalFare {
-    final discounted = double.tryParse(_fare?['discountedEstimatedFare']?.toString() ?? '');
-    final base = discounted ?? (double.tryParse(_fare?['estimatedFare']?.toString() ?? '0') ?? 0.0);
-    return (base - _promoDiscount).clamp(0, double.infinity);
-  }
-
-  void _syncAutoDiscountFromFare() {
-    final fare = _fare;
-    if (fare == null) return;
-    _autoDiscountAmount = double.tryParse(fare['autoDiscountAmount']?.toString() ?? '0') ?? 0;
-    _autoDiscountName = fare['autoDiscountName']?.toString();
+    final f = (_fare?['estimatedFare'] ?? 0).toDouble();
+    return (f - _promoDiscount).clamp(0, double.infinity);
   }
 
   @override
   void initState() {
     super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+    _pulseAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handleRazorpaySuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handleRazorpayError);
     _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await _loadVehicleCategories();
+    if (!mounted) return;
     _estimateFare();
     _fetchWallet();
     _fetchPopularLocations();
     _fetchRoutePolyline();
+  }
+
+  Future<void> _loadVehicleCategories() async {
+    try {
+      final headers = await AuthService.getHeaders();
+      // Production: /api/app/vehicle-categories returns [] when is_active=false.
+      // home-data includes all categories with real UUIDs — required for booking.
+      final homeRes = await http
+          .get(Uri.parse(ApiConfig.customerHomeData), headers: headers)
+          .timeout(const Duration(seconds: 8));
+      if (homeRes.statusCode == 200) {
+        final data = jsonDecode(homeRes.body);
+        final list = data is Map ? data['vehicleCategories'] as List? : null;
+        if (list != null && list.isNotEmpty) {
+          _vehicleCategoriesCache = list
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+          BookingTrace.step('categories_loaded', {
+            'source': 'home-data',
+            'count': _vehicleCategoriesCache.length,
+          });
+          return;
+        }
+      }
+      final type = widget.category ?? 'ride';
+      final uri = Uri.parse(ApiConfig.vehicleCategories).replace(
+        queryParameters: type.isNotEmpty ? {'type': type} : null,
+      );
+      final res = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) return;
+      final data = jsonDecode(res.body);
+      final list = data is List
+          ? data
+          : (data is Map ? data['categories'] as List? : null);
+      if (list == null) return;
+      _vehicleCategoriesCache = list
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      BookingTrace.step('categories_loaded', {
+        'source': 'vehicle-categories',
+        'count': _vehicleCategoriesCache.length,
+      });
+    } catch (e, st) {
+      BookingTrace.error('loadVehicleCategories', e, st);
+    }
+  }
+
+  String? _categoryIdForName(String name) {
+    if (_vehicleCategoriesCache.isEmpty) return null;
+    final key = _bookingVehicleKey(name);
+    for (final cat in _vehicleCategoriesCache) {
+      final catName = (cat['name'] ?? '').toString();
+      if (_bookingVehicleKey(catName) == key) {
+        final id = cat['id']?.toString();
+        if (id != null && id.isNotEmpty) return id;
+      }
+    }
+    final lower = name.toLowerCase();
+    for (final cat in _vehicleCategoriesCache) {
+      final catName = (cat['name'] ?? '').toString().toLowerCase();
+      if (catName == lower ||
+          catName.contains(key) ||
+          (key.isNotEmpty && lower.contains(catName.split(' ').first))) {
+        final id = cat['id']?.toString();
+        if (id != null && id.isNotEmpty) return id;
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _normalizeFare(Map<String, dynamic> fare) {
+    final normalized = Map<String, dynamic>.from(fare);
+    final name = _fareVehicleName(normalized);
+    normalized['vehicleCategoryName'] = name;
+    normalized['vehicleName'] = name;
+    final existingId = normalized['vehicleCategoryId']?.toString() ??
+        normalized['vehicle_category_id']?.toString() ??
+        normalized['id']?.toString();
+    if (existingId != null && existingId.isNotEmpty) {
+      normalized['vehicleCategoryId'] = existingId;
+    } else {
+      final resolved = _categoryIdForName(name);
+      if (resolved != null) normalized['vehicleCategoryId'] = resolved;
+    }
+    return normalized;
+  }
+
+  void _hydrateAllFares() {
+    _allFares = _allFares.map(_normalizeFare).toList();
   }
 
   Future<void> _fetchPopularLocations() async {
@@ -479,6 +535,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   @override
   void dispose() {
     _debounce?.cancel();
+    _pulseController.dispose();
     _promoCtrl.dispose();
     _razorpay.clear();
     _passengerNameCtrl.dispose();
@@ -486,6 +543,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     _receiverNameCtrl.dispose();
     _receiverPhoneCtrl.dispose();
     _noteCtrl.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -496,7 +554,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         headers: headers).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        if (mounted) setState(() => _walletBalance = double.tryParse(data['balance']?.toString() ?? '0') ?? 0.0);
+        if (mounted) setState(() => _walletBalance = (data['balance'] ?? 0).toDouble());
       }
     } catch (_) {}
   }
@@ -521,7 +579,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       final headers = await AuthService.getHeaders();
       final res = await http.post(Uri.parse(ApiConfig.applyCoupon),
         headers: headers,
-        body: jsonEncode({'code': code, 'fareAmount': double.tryParse(_fare?['estimatedFare']?.toString() ?? '0') ?? 0.0})).timeout(const Duration(seconds: 8));
+        body: jsonEncode({'code': code, 'fareAmount': (_fare?['estimatedFare'] ?? 0).toDouble()}))
+        .timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         try {
           final data = jsonDecode(res.body);
@@ -566,74 +625,73 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         final fares = rawFares is List ? rawFares.whereType<Map<String, dynamic>>().toList() : null;
         if (fares != null && fares.isNotEmpty) {
           setState(() {
-            // Rule 2: Strict service separation — filter by category, hide inactive
-            var filtered = fares.toList();
+            var filtered = fares.map(_normalizeFare).toList();
             final cat = widget.category ?? 'ride';
             if (cat == 'parcel') {
               filtered = filtered.where((f) {
-                final vname = (f['vehicleCategoryName'] ?? f['name'] ?? '').toString().toLowerCase();
+                final vname = _fareVehicleName(f).toLowerCase();
                 final vtype = (f['type'] ?? f['vehicleType'] ?? '').toString().toLowerCase();
-                if (vtype == 'ride' || vtype == 'pool') return false;
-                if (vname.contains('premium') || vname.contains('sedan') || vname.contains('suv')) return false;
-                if ((vname.contains('cab') || vname.contains('car')) && !vname.contains('parcel') && !vname.contains('cargo') && !vname.contains('truck')) return false;
-                return vtype == 'parcel' || vname.contains('parcel') || vname.contains('cargo') ||
+                return vtype == 'parcel' || vname.contains('parcel') ||
                     vname.contains('truck') || vname.contains('van') ||
-                    vname.contains('tata') || vname.contains('tempo') || vname.contains('bolero');
+                    vname.contains('tata') || vname.contains('mini');
               }).toList();
             } else {
               filtered = filtered.where((f) {
-                final vname = (f['vehicleCategoryName'] ?? f['name'] ?? '').toString().toLowerCase();
+                final vname = _fareVehicleName(f).toLowerCase();
                 final vtype = (f['type'] ?? f['vehicleType'] ?? '').toString().toLowerCase();
-                // Exclude parcel/cargo/pool vehicles from ride booking
                 if (vtype == 'parcel' || vname.contains('parcel') || vname.contains('truck') || vname.contains('cargo')) return false;
-                if (vtype == 'pool' || vname.contains('pool') || vname.contains('carpool') || vname.contains('share')) return false;
-                // Rule 4: Hide inactive services
                 if (_shouldHideVehicle(vname)) return false;
                 return true;
               }).toList();
             }
             _allFares = filtered;
-            
-            // Ensure we have at least the core categories (Bike, Auto, Cab)
-            if (widget.category != 'parcel') {
+
+            final serverHasRealFares = _allFares.any(
+              (f) => _vehicleCategoryId(f, includeWidgetFallback: false) != null,
+            );
+            if (widget.category != 'parcel' && !serverHasRealFares) {
               final fallbacks = _buildFallbackFares();
               for (var fb in fallbacks) {
                 final fbName = fb['vehicleCategoryName'].toString();
-                // Add fallback if no similar category exists in server result
                 if (!_allFares.any((f) {
-                  final name = (f['vehicleCategoryName'] ?? f['name'] ?? '').toString().toLowerCase();
+                  final name = _fareVehicleName(f).toLowerCase();
                   return name.contains(fbName.split(' ').first.toLowerCase());
                 })) {
                   _allFares.add(fb);
                 }
               }
             }
-            
-            // Final safety check: if still empty (shouldn't happen with fallbacks), use all fallbacks
+
             if (_allFares.isEmpty) _allFares = _buildFallbackFares();
+            _hydrateAllFares();
             if (widget.vehicleCategoryId != null || widget.vehicleCategoryName != null) {
               final targetName = (widget.vehicleCategoryName ?? '').toLowerCase();
               final idx = _allFares.indexWhere((f) {
-                final fName = (f['vehicleCategoryName'] ?? f['name'] ?? '').toString().toLowerCase();
+                final fName = _fareVehicleName(f).toLowerCase();
                 final fId = f['vehicleCategoryId']?.toString() ?? f['id']?.toString();
-                return fId == widget.vehicleCategoryId || 
+                return fId == widget.vehicleCategoryId ||
                        (targetName.isNotEmpty && fName.contains(targetName));
               });
               if (idx >= 0) _selectedFareIndex = idx;
             }
-            _syncAutoDiscountFromFare();
           });
         } else {
-          // Server returned 200 but body wasn't as expected — use fallbacks
-          if (mounted) setState(() { _allFares = _buildFallbackFares(); _usingFallbackFares = true; });
+          if (mounted) setState(() {
+            _allFares = _buildFallbackFares();
+            _hydrateAllFares();
+          });
         }
       } else {
-        // Server returned error status — use fallbacks
-        if (mounted) setState(() { _allFares = _buildFallbackFares(); _usingFallbackFares = true; });
+        if (mounted) setState(() {
+          _allFares = _buildFallbackFares();
+          _hydrateAllFares();
+        });
       }
     } catch (_) {
-      // Network error — show client-side estimates only on connectivity failure
-      if (mounted) setState(() { _allFares = _buildFallbackFares(); _usingFallbackFares = true; });
+      if (mounted) setState(() {
+        _allFares = _buildFallbackFares();
+        _hydrateAllFares();
+      });
     }
     if (mounted) setState(() => _estimating = false);
   }
@@ -647,8 +705,9 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       final raw = (base + dist * perKm).clamp(minFareVal, double.infinity);
       final gst = double.parse((raw * 0.05).toStringAsFixed(2));
       final grandTotal = double.parse((raw + gst).toStringAsFixed(2));
+      final categoryId = _categoryIdForName(name);
       return {
-        'vehicleCategoryId': null,
+        'vehicleCategoryId': categoryId,
         'vehicleCategoryName': name,
         'vehicleName': name,
         'baseFare': base,
@@ -693,6 +752,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     bool includeWidgetFallback = true,
   }) {
     final id = fare?['vehicleCategoryId']?.toString() ??
+        fare?['vehicle_category_id']?.toString() ??
         fare?['id']?.toString() ??
         (includeWidgetFallback ? widget.vehicleCategoryId : null);
     return id == null || id.isEmpty ? null : id;
@@ -734,97 +794,68 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       if (rawFares is! List) return null;
       for (final item in rawFares) {
         if (item is! Map) continue;
-        final fare = Map<String, dynamic>.from(item);
-        if (_vehicleCategoryId(fare, includeWidgetFallback: false) == null) continue;
+        final fare = _normalizeFare(Map<String, dynamic>.from(item));
         if (_bookingVehicleKey(_fareVehicleName(fare)) == selectedKey) return fare;
       }
     } catch (_) {}
     return null;
   }
 
-  String _generateIdempotencyKey() {
-    final rng = Random.secure();
-    final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
-    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  Future<String?> _resolveVehicleCategoryId(Map<String, dynamic>? selectedFare) async {
+    var vcId = _vehicleCategoryId(selectedFare);
+    if (vcId != null) return vcId;
+
+    final name = _fareVehicleName(selectedFare ?? const <String, dynamic>{});
+    vcId = _categoryIdForName(name);
+    if (vcId != null) return vcId;
+
+    final resolvedFare = await _resolveServerFare(selectedFare);
+    if (resolvedFare != null) {
+      vcId = _vehicleCategoryId(resolvedFare);
+      if (vcId != null) {
+        if (mounted && selectedFare != null) {
+          final idx = _allFares.indexWhere((f) => identical(f, selectedFare));
+          final targetIdx = idx >= 0 ? idx : _selectedFareIndex;
+          if (targetIdx >= 0 && targetIdx < _allFares.length) {
+            setState(() => _allFares[targetIdx] = resolvedFare);
+          }
+        }
+        return vcId;
+      }
+    }
+
+    if (_vehicleCategoriesCache.isEmpty) await _loadVehicleCategories();
+    return _categoryIdForName(name);
   }
 
-  void _clearPendingPaymentBooking() {
-    _pendingBookingIntentId = null;
-    _pendingRazorpayPaymentId = null;
-    _paidBookIdempotencyKey = null;
-    _paymentVerifiedPendingBook = false;
-  }
-
-  void _navigateToTrip(String tripId) {
-    if (tripId.isEmpty) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => TrackingScreen(tripId: tripId)),
-    );
-  }
-
-  Map<String, dynamic> _buildBookingDraft() {
-    final selectedFare = _fare;
-    final vcId = _vehicleCategoryId(selectedFare);
-    final vcName = selectedFare?['vehicleCategoryName']?.toString() ??
-        selectedFare?['name']?.toString() ??
-        widget.vehicleCategoryName ??
-        '';
-    final selectedFareAmount =
-        double.tryParse(selectedFare?['estimatedFare']?.toString() ?? '') ?? 0;
-    final estimatedFare =
-        (selectedFareAmount - _promoDiscount).clamp(0, double.infinity);
-    return {
-      'pickupAddress': widget.pickup,
-      'pickupLat': widget.pickupLat,
-      'pickupLng': widget.pickupLng,
-      'pickupShortName': _shortLocation(widget.pickup),
-      'destinationAddress': widget.destination,
-      'destinationLat': widget.destLat,
-      'destinationLng': widget.destLng,
-      'destinationShortName': _shortLocation(widget.destination),
-      if (vcId != null) 'vehicleCategoryId': vcId,
-      'vehicleType': vcName,
-      if (vcName.isNotEmpty) 'vehicleCategoryName': vcName,
-      'estimatedFare': estimatedFare,
-      'estimatedDistance': _distanceKm,
-      'paymentMethod': _paymentMethod,
-      'tripType': 'normal',
-    };
-  }
-
-  Future<void> _confirmBooking({
-    String? razorpayPaymentId,
-    String? bookingIntentId,
-  }) async {
+  Future<void> _confirmBooking({String? razorpayPaymentId}) async {
     if (_loading) return;
     setState(() => _loading = true);
-    final effectiveIntentId = bookingIntentId ?? _pendingBookingIntentId;
-    final effectivePaymentId = razorpayPaymentId ?? _pendingRazorpayPaymentId;
     try {
       final headers = await AuthService.getHeaders();
-      if (effectivePaymentId != null) {
-        _paidBookIdempotencyKey ??= _generateIdempotencyKey();
-        headers['Idempotency-Key'] = _paidBookIdempotencyKey!;
-      } else {
-        headers['Idempotency-Key'] = _generateIdempotencyKey();
-      }
       var selectedFare = _fare;
-      var vcId = _vehicleCategoryId(selectedFare);
-      if (vcId == null) {
-        final resolvedFare = await _resolveServerFare(selectedFare);
-        if (resolvedFare != null) {
-          selectedFare = resolvedFare;
-          vcId = _vehicleCategoryId(resolvedFare);
-          if (mounted && _allFares.isNotEmpty) {
-            setState(() => _allFares[_selectedFareIndex] = resolvedFare!);
-          }
+      BookingTrace.step('confirm_start', {
+        'vehicle': _fareVehicleName(selectedFare ?? const {}),
+        'payment': _paymentMethod,
+        'distanceKm': _distanceKm,
+      });
+      var vcId = await _resolveVehicleCategoryId(selectedFare);
+      BookingTrace.step('category_resolved', {'vehicleCategoryId': vcId ?? 'null'});
+      if (vcId != null && selectedFare != null) {
+        selectedFare = _normalizeFare(selectedFare);
+        if (mounted && _selectedFareIndex < _allFares.length) {
+          setState(() => _allFares[_selectedFareIndex] = selectedFare!);
         }
       }
       if (vcId == null) {
-        if (mounted) setState(() => _loading = false);
-        _showSnack('Could not refresh vehicle availability. Please try again.', error: true);
-        return;
+        final vehicleName = _fareVehicleName(selectedFare ?? const <String, dynamic>{});
+        if (vehicleName.isEmpty) {
+          if (mounted) setState(() => _loading = false);
+          BookingTrace.error('confirm_abort', 'vehicleCategoryId unresolved');
+          _showSnack('Could not refresh vehicle availability. Please try again.', error: true);
+          return;
+        }
+        BookingTrace.step('category_deferred', {'vehicleName': vehicleName});
       }
       final selectedFareAmount =
           double.tryParse(selectedFare?['estimatedFare']?.toString() ?? '') ?? 0;
@@ -840,8 +871,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         'paymentMethod': _paymentMethod,
         if (_promoDiscount > 0) 'promoDiscount': _promoDiscount,
         if (_appliedPromo != null) 'couponCode': _appliedPromo,
-        if (effectivePaymentId != null) 'razorpayPaymentId': effectivePaymentId,
-        if (effectiveIntentId != null) 'bookingIntentId': effectiveIntentId,
+        if (razorpayPaymentId != null) 'razorpayPaymentId': razorpayPaymentId,
         'ride_for': _bookForSomeone ? 'other' : 'self',
         if (_bookForSomeone) 'isForSomeoneElse': true,
         if (_bookForSomeone && _passengerNameCtrl.text.trim().isNotEmpty) ...{
@@ -860,25 +890,27 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           'note': _noteCtrl.text.trim(),
       };
 
-      final vcName = selectedFare?['vehicleCategoryName']?.toString() ?? selectedFare?['name']?.toString() ?? widget.vehicleCategoryName ?? '';
-      body['vehicleCategoryId'] = vcId;
+      final vcName = _fareVehicleName(selectedFare ?? const <String, dynamic>{});
+      if (vcId != null) body['vehicleCategoryId'] = vcId;
       if (vcName.isNotEmpty) {
         body['vehicleCategoryName'] = vcName;
         body['vehicleCategory'] = vcName;
         body['vehicleName'] = vcName;
       }
+      BookingTrace.api('POST', ApiConfig.bookRide, body: jsonEncode(body));
+      final idempotencyKey = generateIdempotencyKey();
       final res = await apiRetry(() => http.post(Uri.parse(ApiConfig.bookRide),
-        headers: headers,
+        headers: {...headers, 'Idempotency-Key': idempotencyKey},
         body: jsonEncode(body)).timeout(const Duration(seconds: 15)));
+      BookingTrace.api('POST', ApiConfig.bookRide, status: res.statusCode, body: res.body);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final tripId = data['trip']?['id']?.toString() ?? '';
-        _clearPendingPaymentBooking();
         debugPrint(
             '[DISPATCH] Ride request created tripId=$tripId status=${data['trip']?['currentStatus'] ?? data['trip']?['status']} vehicleCategoryId=$vcId');
         AnalyticsService().logRideBooked(
           rideId: tripId,
-          fare: double.tryParse(_fare?['estimatedFare']?.toString() ?? '0') ?? 0.0,
+          fare: (_fare?['estimatedFare'] ?? 0).toDouble(),
           rideType: vcName ?? 'standard',
         );
         if (!mounted) return;
@@ -888,38 +920,22 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           Navigator.pop(context);
           return;
         }
-        _navigateToTrip(tripId);
+        Navigator.pushReplacement(context, MaterialPageRoute(
+          builder: (_) => TrackingScreen(tripId: tripId)));
       } else if (res.statusCode == 409) {
-        debugPrint(
-            '[DISPATCH] Ride request conflict status=409 body=${res.body}');
         if (!mounted) return;
         try {
-          final err = jsonDecode(res.body);
-          final code = err['code']?.toString() ?? '';
-          final tripId = err['tripId']?.toString() ??
-              err['trip']?['id']?.toString() ??
-              '';
-          if (code == 'BOOKING_ALREADY_EXISTS' && tripId.isNotEmpty) {
-            _clearPendingPaymentBooking();
-            _navigateToTrip(tripId);
+          final err = jsonDecode(res.body) as Map<String, dynamic>;
+          final tripId = err['tripId']?.toString() ?? err['trip']?['id']?.toString() ?? '';
+          if (tripId.isNotEmpty) {
+            BookingTrace.step('confirm_existing_trip', {'tripId': tripId});
+            Navigator.pushReplacement(context, MaterialPageRoute(
+              builder: (_) => TrackingScreen(tripId: tripId)));
             return;
           }
-          if (code == 'BOOKING_FAILED_PAYMENT_RECEIVED' || err['recoverable'] == true) {
-            _pendingBookingIntentId =
-                err['bookingIntentId']?.toString() ?? effectiveIntentId;
-            _pendingRazorpayPaymentId =
-                err['razorpayPaymentId']?.toString() ?? effectivePaymentId;
-            _paymentVerifiedPendingBook = true;
-            _showSnack(
-              err['message']?.toString() ??
-                  'Payment received. Booking could not be completed. Please retry.',
-              error: true,
-            );
-            return;
-          }
-          _showSnack(err['message']?.toString() ?? 'Booking failed', error: true);
+          _showSnack(err['message']?.toString() ?? 'Active trip exists', error: true);
         } catch (_) {
-          _showSnack('Booking failed. Please try again.', error: true);
+          _showSnack('Active trip exists. Check My Trips.', error: true);
         }
       } else {
         debugPrint(
@@ -935,17 +951,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     } catch (e) {
       debugPrint('[DISPATCH] Ride request creation threw: $e');
       if (!mounted) return;
-      if (effectivePaymentId != null && effectiveIntentId != null) {
-        _pendingBookingIntentId = effectiveIntentId;
-        _pendingRazorpayPaymentId = effectivePaymentId;
-        _paymentVerifiedPendingBook = true;
-        _showSnack(
-          'Payment received. Booking could not be completed. Please retry.',
-          error: true,
-        );
-      } else {
-        _showSnack('Network error. Try again.', error: true);
-      }
+      _showSnack('Network error. Try again.', error: true);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -1078,19 +1084,17 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   }
 
   Future<void> _handleOnConfirm() async {
-    if (_paymentVerifiedPendingBook && _pendingRazorpayPaymentId != null) {
-      await _confirmBooking(
-        razorpayPaymentId: _pendingRazorpayPaymentId,
-        bookingIntentId: _pendingBookingIntentId,
-      );
-      return;
-    }
+    try {
+      final statuses = await _vehicleStatusService.watchVehicleStatuses().first;
+      if (!VehicleStatusService.isActive(statuses, _vehicleName)) {
+        _showSnack('$_vehicleName is temporarily unavailable. Please try another vehicle.', error: true);
+        return;
+      }
+    } catch (_) {}
     if (_paymentMethod == 'upi') {
       await _startRazorpayRidePayment();
     } else {
       if (_paymentMethod == 'wallet') {
-        // Refresh balance immediately before payment — avoids stale cached value
-        await _fetchWallet();
         final fare = _finalFare;
         if (_walletBalance < fare) {
           _showSnack('Insufficient wallet balance. Please recharge.', error: true);
@@ -1104,34 +1108,12 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   Future<void> _startRazorpayRidePayment() async {
     if (_loading) return;
     setState(() => _loading = true);
-    _clearPendingPaymentBooking();
     try {
-      var selectedFare = _fare;
-      var vcId = _vehicleCategoryId(selectedFare);
-      if (vcId == null) {
-        final resolvedFare = await _resolveServerFare(selectedFare);
-        if (resolvedFare != null) {
-          selectedFare = resolvedFare;
-          vcId = _vehicleCategoryId(resolvedFare);
-          if (mounted && _allFares.isNotEmpty) {
-            setState(() => _allFares[_selectedFareIndex] = resolvedFare);
-          }
-        }
-      }
-      if (vcId == null) {
-        if (mounted) setState(() => _loading = false);
-        _showSnack('Could not refresh vehicle availability. Please try again.', error: true);
-        return;
-      }
       final headers = await AuthService.getHeaders();
       final fare = _finalFare;
       final res = await http.post(Uri.parse(ApiConfig.rideCreateOrder),
         headers: headers,
-        body: jsonEncode({
-          'amount': fare,
-          'paymentMethod': _paymentMethod,
-          'bookingDraft': _buildBookingDraft(),
-        })).timeout(const Duration(seconds: 15));
+        body: jsonEncode({'amount': fare})).timeout(const Duration(seconds: 15));
       if (res.statusCode != 200) {
         setState(() => _loading = false);
         try {
@@ -1144,12 +1126,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       }
       final data = jsonDecode(res.body);
       final order = data['order'];
-      final keyId = data['keyId']?.toString() ?? '';
-      final bookingIntentId = data['bookingIntentId']?.toString() ?? '';
-      if (bookingIntentId.isNotEmpty) {
-        _pendingBookingIntentId = bookingIntentId;
-      }
-      if (order == null || keyId.isEmpty || !keyId.startsWith('rzp_')) {
+      final keyId = data['keyId'];
+      if (order == null || keyId == null) {
         setState(() => _loading = false);
         _showSnack('Payment setup failed. Try again.', error: true);
         return;
@@ -1175,68 +1153,26 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     }
   }
 
-  Future<Map<String, dynamic>?> _verifyRidePaymentWithRetry({
-    required String razorpayOrderId,
-    required String razorpayPaymentId,
-    required String razorpaySignature,
-    required int maxAttempts,
-  }) async {
-    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        final headers = await AuthService.getHeaders();
-        final verifyRes = await http.post(
-          Uri.parse(ApiConfig.rideVerifyPayment),
-          headers: headers,
-          body: jsonEncode({
-            'razorpayOrderId': razorpayOrderId,
-            'razorpayPaymentId': razorpayPaymentId,
-            'razorpaySignature': razorpaySignature,
-            'amount': _finalFare,
-          }),
-        ).timeout(const Duration(seconds: 15));
-        final body = jsonDecode(verifyRes.body);
-        if (verifyRes.statusCode == 200 || verifyRes.statusCode == 409) {
-          return Map<String, dynamic>.from(body is Map ? body : {});
-        }
-        if (verifyRes.statusCode >= 400 && verifyRes.statusCode < 500) {
-          return null;
-        }
-      } catch (_) {}
-      if (attempt < maxAttempts) {
-        await Future.delayed(Duration(seconds: attempt * 2));
-      }
-    }
-    return null;
-  }
-
   void _handleRazorpaySuccess(PaymentSuccessResponse response) async {
     if (!mounted) return;
     setState(() => _loading = true);
     try {
-      final verified = await _verifyRidePaymentWithRetry(
-        razorpayOrderId: response.orderId ?? '',
-        razorpayPaymentId: response.paymentId ?? '',
-        razorpaySignature: response.signature ?? '',
-        maxAttempts: 3,
-      );
-      if (verified == null) {
+      final headers = await AuthService.getHeaders();
+      final verifyRes = await http.post(Uri.parse(ApiConfig.rideVerifyPayment),
+        headers: headers,
+        body: jsonEncode({
+          'razorpayOrderId': response.orderId,
+          'razorpayPaymentId': response.paymentId,
+          'razorpaySignature': response.signature,
+          'amount': _finalFare,
+        })).timeout(const Duration(seconds: 15));
+      if (verifyRes.statusCode == 200) {
+        await _confirmBooking(razorpayPaymentId: response.paymentId);
+      } else {
         if (!mounted) return;
         setState(() => _loading = false);
         _showSnack('Payment verification failed. Contact support.', error: true);
-        return;
       }
-      final paymentId =
-          verified['paymentId']?.toString() ?? response.paymentId ?? '';
-      final intentId =
-          verified['bookingIntentId']?.toString() ?? _pendingBookingIntentId;
-      if (intentId != null && intentId.isNotEmpty) {
-        _pendingBookingIntentId = intentId;
-      }
-      _pendingRazorpayPaymentId = paymentId;
-      await _confirmBooking(
-        razorpayPaymentId: paymentId,
-        bookingIntentId: intentId,
-      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -1255,8 +1191,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
 
   void _showSnack(String msg, {bool error = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w400, color: Colors.white)),
-      backgroundColor: error ? const Color(0xFFDC2626) : _green,
+      content: Text(msg, style: GoogleFonts.poppins(fontWeight: FontWeight.w500, color: JT.buttonText)),
+      backgroundColor: error ? JT.danger : JT.success,
       behavior: SnackBarBehavior.floating,
       margin: const EdgeInsets.all(16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1313,7 +1249,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       }
     } catch (_) {}
 
-    // Attempt 2: Backend Navigation API (server-proxied, no client key needed)
+    // Attempt 2: Backend Navigation API (server-side — no client Maps REST key)
     if (!success) {
       try {
         final headers = await AuthService.getHeaders();
@@ -1327,7 +1263,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             'optimize': false,
           }),
         ).timeout(const Duration(seconds: 4));
-
+        
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as Map<String, dynamic>;
           final overviewPolyline = data['overviewPolyline']?.toString();
@@ -1353,7 +1289,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           Polyline( // Production quality curvy road line constraint
             polylineId: const PolylineId('route'),
             points: points,
-            color: _moduleAccent,
+            color: JT.primary,
             width: 5,
             jointType: JointType.round,
             startCap: Cap.roundCap,
@@ -1369,7 +1305,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           Polyline(
             polylineId: const PolylineId('route_fallback'),
             points: [_pickupLatLng, _destLatLng],
-            color: _blue, width: 4,
+            color: JT.primary, width: 5,
             patterns: [PatternItem.dash(20), PatternItem.gap(10)]
           )
         };
@@ -1380,171 +1316,300 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
+    final bookLabel = _vehicleName.split(' ').first;
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F7FF),
-      body: Column(
+      backgroundColor: JT.bg,
+      body: Stack(
         children: [
-          // Global Header
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: JT.logoBlue(height: 56),
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _pulseAnimation,
+              builder: (context, _) => JagoMapView(
+                controller: _mapController,
+                initialCameraPosition: CameraPosition(target: _pickupLatLng, zoom: 14),
+                onMapCreated: (_) => _fitMapToRoute(),
+                markers: {
+                  Marker(markerId: const MarkerId('pickup'), position: _pickupLatLng),
+                  Marker(markerId: const MarkerId('destination'), position: _destLatLng),
+                },
+                circles: {
+                  Circle(
+                    circleId: const CircleId('pickup_pulse'),
+                    center: _pickupLatLng,
+                    radius: 35 + _pulseAnimation.value * 25,
+                    fillColor: JT.primary.withValues(alpha: 0.10 * (1 - _pulseAnimation.value * 0.5)),
+                    strokeColor: JT.primary.withValues(alpha: 0.35),
+                    strokeWidth: 2,
                   ),
-                  Row(
-                    children: [
-                      _headerAction(Icons.account_balance_wallet_outlined),
-                      const SizedBox(width: 12),
-                      _headerAction(Icons.notifications_none_rounded),
-                    ],
-                  ),
-                ],
+                },
+                polylines: _polylines,
               ),
             ),
           ),
-          
-          Expanded(
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-              ),
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-                child: Stack(
-                  children: [
-                    GoogleMap(
-                      initialCameraPosition: CameraPosition(target: _pickupLatLng, zoom: 14),
-                      onMapCreated: (c) {
-                        _mapController = c;
-                        _fitMapToRoute();
-                      },
-                      markers: {
-                        Marker(markerId: const MarkerId('p'), position: _pickupLatLng, icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure)),
-                        Marker(markerId: const MarkerId('d'), position: _destLatLng, icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
-                      },
-                      polylines: _polylines,
-                      zoomControlsEnabled: false,
-                      myLocationButtonEnabled: false,
-                      mapToolbarEnabled: false,
-                    ),
-                    
-                    // Floating Address Card
-                    Positioned(
-                      top: 20, left: 20, right: 20,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 20, offset: const Offset(0, 8))],
-                        ),
-                        child: Column(
-                          children: [
-                            _addressRow(Icons.circle, JT.primary, widget.pickup),
-                            _addressRow(Icons.location_on, const Color(0xFFEF4444), widget.destination),
-                          ],
-                        ),
-                      ),
-                    ),
 
-                    // Draggable Sheet
-                    DraggableScrollableSheet(
-                      initialChildSize: 0.45,
-                      minChildSize: 0.35,
-                      maxChildSize: 0.9,
-                      builder: (context, scrollController) {
-                        return Container(
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-                            boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20, spreadRadius: 2)],
-                          ),
-                          child: StreamBuilder<Map<String, VehicleStatus>>(
-                            stream: _vehicleStatusService.watchVehicleStatuses(),
-                            builder: (context, snapshot) {
-                              final statuses = snapshot.data ?? {};
-                              final visibleFares = _allFares;
-                              final canBook = !_loading && !_estimating && visibleFares.isNotEmpty;
-
-                              return Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: const BorderRadius.only(
-                                    topLeft: Radius.circular(32),
-                                    topRight: Radius.circular(32),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.1),
-                                      blurRadius: 20,
-                                      offset: const Offset(0, -5),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  children: [
-                                    Container(
-                                      width: 48, height: 5,
-                                      margin: const EdgeInsets.symmetric(vertical: 14),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.shade300,
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: ListView(
-                                        controller: scrollController,
-                                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                                        children: [
-                                          _buildVehicleSelector(statuses),
-                                          const SizedBox(height: 24),
-                                          _buildPaymentSection(),
-                                          const SizedBox(height: 24),
-                                          Container(
-                                            decoration: BoxDecoration(
-                                              borderRadius: BorderRadius.circular(16),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: const Color(0xFF2D8CFF).withOpacity(0.3),
-                                                  blurRadius: 15,
-                                                  offset: const Offset(0, 8),
-                                                ),
-                                              ],
-                                            ),
-                                            child: JT.gradientButton(
-                                              label: visibleFares.isEmpty ? 'No vehicles available' : 'Confirm Ride',
-                                              loading: _loading,
-                                              onTap: canBook ? () => _goToRideForWhomScreen() : () {},
-                                              radius: 16,
-                                              height: 60,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 20),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            left: 12,
+            child: Material(
+              color: JT.card,
+              elevation: 6,
+              shadowColor: Colors.black26,
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => Navigator.pop(context),
+                child: const SizedBox(
+                  width: 44, height: 44,
+                  child: Icon(Icons.arrow_back_rounded, color: JT.textPrimary),
                 ),
               ),
             ),
           ),
+
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            left: 64,
+            right: 12,
+            child: Column(
+              children: [
+                _rapidoAddressChip(
+                  icon: Icons.circle,
+                  iconColor: JT.primary,
+                  label: _shortLocation(widget.pickup),
+                ),
+                const SizedBox(height: 8),
+                _rapidoAddressChip(
+                  icon: Icons.location_on_rounded,
+                  iconColor: JT.danger,
+                  label: _shortLocation(widget.destination),
+                ),
+              ],
+            ),
+          ),
+
+          DraggableScrollableSheet(
+            initialChildSize: 0.44,
+            minChildSize: 0.34,
+            maxChildSize: 0.88,
+            snap: true,
+            snapSizes: const [0.44, 0.68],
+            builder: (context, scrollController) {
+              return Container(
+                decoration: BoxDecoration(
+                  color: JT.card,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(JT.radiusSheet)),
+                  boxShadow: JT.shadowLg,
+                ),
+                child: StreamBuilder<Map<String, VehicleStatus>>(
+                  stream: _vehicleStatusService.watchVehicleStatuses(),
+                  builder: (context, snapshot) {
+                    final statuses = snapshot.data ?? {};
+                    final visibleFares = _visibleFareEntries(statuses);
+                    final canBook = !_loading && !_estimating && visibleFares.isNotEmpty;
+
+                    return Column(
+                      children: [
+                        Container(
+                          width: 44, height: 4,
+                          margin: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: JT.border,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        Expanded(
+                          child: ListView(
+                            controller: scrollController,
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            children: [
+                              _buildVehicleSelector(statuses),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: EdgeInsets.fromLTRB(
+                            16, 12, 16, 12 + MediaQuery.of(context).padding.bottom,
+                          ),
+                          decoration: BoxDecoration(
+                            color: JT.card,
+                            border: Border(top: BorderSide(color: JT.border.withValues(alpha: 0.8))),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.06),
+                                blurRadius: 12,
+                                offset: const Offset(0, -4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _rapidoPayRow(
+                                      icon: Icons.payments_rounded,
+                                      label: _paymentMethod == 'cash'
+                                          ? 'Cash'
+                                          : (_paymentMethod == 'wallet' ? 'Wallet' : 'UPI'),
+                                      onTap: () => _showPaymentPicker(),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _rapidoPayRow(
+                                      icon: Icons.local_offer_outlined,
+                                      label: 'Offers',
+                                      onTap: _promoCtrl.text.isNotEmpty ? null : () => _showPromoDialog(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              JT.bookCta(
+                                label: visibleFares.isEmpty ? 'No vehicles available' : 'Book $bookLabel',
+                                loading: _loading,
+                                onTap: canBook ? () => _handleOnConfirm() : null,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              );
+            },
+          ),
         ],
       ),
-      bottomNavigationBar: _buildBottomNav(),
+    );
+  }
+
+  Widget _rapidoAddressChip({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: JT.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: JT.border),
+        boxShadow: JT.shadowSm,
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor, size: icon == Icons.circle ? 10 : 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: JT.textPrimary,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const Icon(Icons.edit_outlined, size: 16, color: JT.textTertiary),
+        ],
+      ),
+    );
+  }
+
+  Widget _rapidoPayRow({
+    required IconData icon,
+    required String label,
+    VoidCallback? onTap,
+  }) {
+    return Material(
+      color: JT.bg,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: JT.border),
+            boxShadow: JT.shadowXs,
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: JT.textSecondary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: JT.textPrimary,
+                  ),
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, size: 18, color: JT.textTertiary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPaymentPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Payment Method', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: JT.textPrimary)),
+              const SizedBox(height: 12),
+              _payBtn('cash', Icons.payments_rounded, 'Cash'),
+              const SizedBox(height: 8),
+              _payBtn('wallet', Icons.account_balance_wallet_rounded, 'Wallet'),
+              const SizedBox(height: 8),
+              _payBtn('upi', Icons.qr_code_scanner_rounded, 'UPI'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPromoDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Apply Offer'),
+        content: TextField(
+          controller: _promoCtrl,
+          decoration: const InputDecoration(hintText: 'Enter coupon code'),
+          textCapitalization: TextCapitalization.characters,
+          onChanged: _onCouponChanged,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _applyPromo();
+            },
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1624,7 +1689,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   Widget _payBtn(String method, IconData icon, String label) {
     final selected = _paymentMethod == method;
     const blue = Color(0xFF2D8CFF);
-    const lavender = JT.primary;
+    const lavender = Color(0xFF2C95F1);
     
     return GestureDetector(
       onTap: () {
@@ -1652,7 +1717,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             const SizedBox(height: 6),
             Text(
               label,
-              style: GoogleFonts.outfit(
+              style: GoogleFonts.poppins(
                 fontSize: 13,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 color: selected ? lavender : Colors.grey.shade600,
@@ -1732,9 +1797,9 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     int fastestIdx = 0, saverIdx = 0, premiumIdx = 0;
     for (int j = 0; j < _allFares.length; j++) {
       final f = _allFares[j];
-      final fare = double.tryParse(f['estimatedFare']?.toString() ?? '0') ?? 0.0;
-      final bestFare = double.tryParse(_allFares[saverIdx]['estimatedFare']?.toString() ?? '0') ?? 0.0;
-      final highFare = double.tryParse(_allFares[premiumIdx]['estimatedFare']?.toString() ?? '0') ?? 0.0;
+      final fare = (f['estimatedFare'] ?? 0).toDouble();
+      final bestFare = (_allFares[saverIdx]['estimatedFare'] ?? 0).toDouble();
+      final highFare = (_allFares[premiumIdx]['estimatedFare'] ?? 0).toDouble();
       if (fare < bestFare) saverIdx = j;
       if (fare > highFare) premiumIdx = j;
       final timeStr = f['estimatedTime']?.toString() ?? '99 min';
@@ -1754,7 +1819,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     IconData icon;
     switch (tag) {
       case 'FASTEST':
-        color = JT.primary; // Premium Purple matching image
+        color = const Color(0xFF2C95F1); // Premium Purple matching image
         icon = Icons.bolt_rounded;
         break;
       case 'SAVER':
@@ -1784,7 +1849,6 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
   }
 
   void _fitMapToRoute({List<LatLng>? routePoints}) {
-    if (_mapController == null) return;
     Future.delayed(const Duration(milliseconds: 300), () {
       double minLat, maxLat, minLng, maxLng;
       
@@ -1809,13 +1873,13 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
       }
 
       try {
-        _mapController?.animateCamera(CameraUpdate.newLatLngBounds(
+        _mapController.fitBounds(
           LatLngBounds(
             southwest: LatLng(minLat, minLng),
             northeast: LatLng(maxLat, maxLng),
           ),
-          90, // Significant visual padding for the route
-        ));
+          padding: 90,
+        );
       } catch (_) {}
     });
   }
@@ -1850,10 +1914,10 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             const SizedBox(height: 12),
             Text(
               'No vehicles available',
-              style: GoogleFonts.outfit(
+              style: GoogleFonts.poppins(
                 color: const Color(0xFF0F172A),
                 fontSize: 17,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 6),
@@ -1874,7 +1938,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         final isActive = f['isActive'] != false;
         final isSelected = i == _selectedFareIndex && isActive;
         final name = f['vehicleCategoryName']?.toString() ?? f['vehicleName']?.toString() ?? f['name']?.toString() ?? 'Bike';
-        final fareVal = double.tryParse(f['estimatedFare']?.toString() ?? '0') ?? 0.0;
+        final fareVal = (f['estimatedFare'] ?? 0).toDouble();
         final time = f['estimatedTime']?.toString() ?? '~5 min';
         final displayFare = isSelected ? (fareVal - _promoDiscount).clamp(0.0, double.infinity) : fareVal;
         
@@ -1885,58 +1949,49 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         
         final subtitle = isActive ? '$etaMins min • Drop $dropTime' : 'Currently Unavailable';
 
-        // Elite Selection Palette
-        final Color selColor = JT.primary; // Jago Lavender
-        final Color blueColor = const Color(0xFF2D8CFF); // Jago Blue
-        
         return GestureDetector(
           key: ValueKey(i),
           onTap: () {
             if (!isActive) return;
             HapticFeedback.selectionClick();
             setState(() => _selectedFareIndex = i);
-            _syncAutoDiscountFromFare();
           },
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(12),
+            duration: JT.animationMedium,
+            curve: Curves.easeOutCubic,
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
             decoration: BoxDecoration(
-              color: isSelected ? selColor.withOpacity(0.06) : Colors.white,
-              borderRadius: BorderRadius.circular(20),
+              color: isSelected ? JT.primaryLight : JT.card,
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: isSelected ? selColor.withOpacity(0.3) : Colors.grey.shade100,
+                color: isSelected ? JT.primary : JT.border,
                 width: isSelected ? 2 : 1,
               ),
-              boxShadow: isSelected ? [
-                BoxShadow(color: selColor.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4))
-              ] : [
-                BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2))
-              ],
+              boxShadow: isSelected ? JT.shadowMd : JT.shadowSm,
             ),
             child: Opacity(
-              opacity: isActive ? 1.0 : 0.6,
+              opacity: isActive ? 1.0 : 0.55,
               child: Row(
                 children: [
-                  // Vehicle Illustration
                   Container(
-                    width: 70, height: 70,
+                    width: 62, height: 54,
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: isSelected ? selColor.withOpacity(0.1) : const Color(0xFFF9FAFB),
+                      color: isSelected ? JT.card : JT.bg,
                       borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isSelected ? JT.primary.withValues(alpha: 0.15) : JT.border,
+                      ),
                     ),
-                    child: Builder(builder: (_) {
-                      final imgKey = _vehicleImageKey(name);
-                      final imgUrl = imgKey != null ? _vehicleImageUrls[imgKey] : null;
-                      return imgUrl != null 
-                          ? Image.network(imgUrl, fit: BoxFit.contain)
-                          : Center(child: Text(_emojiForVehicle(name), style: const TextStyle(fontSize: 32)));
-                    }),
+                    child: VehicleArtwork(
+                      vehicleKey: name,
+                      adminIcon: f['vehicleIcon']?.toString() ?? f['icon']?.toString(),
+                      width: 54,
+                      height: 46,
+                    ),
                   ),
-                  const SizedBox(width: 16),
-                  
-                  // Details
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1945,58 +2000,62 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
                           children: [
                             Text(
                               name,
-                              style: GoogleFonts.outfit(
-                                fontSize: 18, 
-                                fontWeight: FontWeight.w700, 
-                                color: const Color(0xFF1E293B)
+                              style: GoogleFonts.poppins(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: JT.textPrimary,
                               ),
                             ),
                             if (isFastest && isActive) ...[
                               const SizedBox(width: 8),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFE8F2FF),
+                                  color: JT.primaryLight,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: Text('FASTEST', 
-                                  style: GoogleFonts.outfit(color: blueColor, fontSize: 9, fontWeight: FontWeight.w800)),
+                                child: Text(
+                                  'FASTEST',
+                                  style: GoogleFonts.poppins(
+                                    color: JT.primary,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                               ),
                             ],
                           ],
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
                         Text(
                           subtitle,
-                          style: GoogleFonts.outfit(
-                            color: isSelected ? selColor : const Color(0xFF64748B), 
-                            fontSize: 13, 
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400
+                          style: GoogleFonts.poppins(
+                            color: isSelected ? JT.primaryDark : JT.textSecondary,
+                            fontSize: 13,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  
-                  // Pricing
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
                         '₹${displayFare.toStringAsFixed(0)}',
-                        style: GoogleFonts.outfit(
-                          fontSize: 22, 
-                          fontWeight: FontWeight.w800, 
-                          color: const Color(0xFF1E293B)
+                        style: GoogleFonts.poppins(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: JT.textPrimary,
                         ),
                       ),
                       if (isSelected && _promoDiscount > 0)
                         Text(
-                          '₹${fareVal.toInt()}',
-                          style: const TextStyle(
-                            fontSize: 12, 
-                            color: Colors.grey, 
-                            decoration: TextDecoration.lineThrough
+                          '₹${fareVal.toStringAsFixed(0)}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            decoration: TextDecoration.lineThrough,
+                            color: JT.textTertiary,
                           ),
                         ),
                     ],
@@ -2016,15 +2075,15 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
     const textMain = JT.textPrimary;
     final textSub = Colors.grey.shade600;
 
-    final baseFare = double.tryParse(fare['baseFare']?.toString() ?? '0') ?? 0.0;
-    final distanceFare = double.tryParse(fare['distanceFare']?.toString() ?? '0') ?? 0.0;
-    final timeFare = double.tryParse(fare['timeFare']?.toString() ?? '0') ?? 0.0;
-    final helperCharge = double.tryParse(fare['helperCharge']?.toString() ?? '0') ?? 0.0;
-    final gst = double.tryParse(fare['gst']?.toString() ?? '0') ?? 0.0;
-    final minFare = double.tryParse(fare['minimumFare']?.toString() ?? '0') ?? 0.0;
-    final farePerKm = double.tryParse(fare['farePerKm']?.toString() ?? '0') ?? 0.0;
-    final waitingChargePerMin = double.tryParse(fare['waitingChargePerMin']?.toString() ?? '0') ?? 0.0;
-    final subtotal = double.tryParse(fare['subtotal']?.toString() ?? '') ?? (baseFare + distanceFare + timeFare);
+    final baseFare = (fare['baseFare'] ?? 0).toDouble();
+    final distanceFare = (fare['distanceFare'] ?? 0).toDouble();
+    final timeFare = (fare['timeFare'] ?? 0).toDouble();
+    final helperCharge = (fare['helperCharge'] ?? 0).toDouble();
+    final gst = (fare['gst'] ?? 0).toDouble();
+    final minFare = (fare['minimumFare'] ?? 0).toDouble();
+    final farePerKm = (fare['farePerKm'] ?? 0).toDouble();
+    final waitingChargePerMin = (fare['waitingChargePerMin'] ?? 0).toDouble();
+    final subtotal = (fare['subtotal'] ?? (baseFare + distanceFare + timeFare)).toDouble();
     final isMinFareApplied = minFare > 0 && subtotal <= minFare + 0.01;
     final isNight = fare['isNightCharge'] == true;
 
@@ -2039,15 +2098,15 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         Container(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
           decoration: BoxDecoration(
-            color: _moduleAccent.withValues(alpha: 0.06),
+            color: JT.primary.withValues(alpha: 0.06),
             borderRadius: const BorderRadius.only(topLeft: Radius.circular(15), topRight: Radius.circular(15)),
             border: Border(bottom: BorderSide(color: borderCol)),
           ),
           child: Row(children: [
-            Icon(Icons.receipt_long_rounded, size: 16, color: _moduleAccent),
+            const Icon(Icons.receipt_long_rounded, size: 16, color: JT.primary),
             const SizedBox(width: 8),
             Text(_isParcel ? 'Delivery Fare Details' : 'Fare Breakdown',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w400, color: _moduleAccent)),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w400, color: JT.primary)),
             const Spacer(),
             if (isMinFareApplied)
               Container(
@@ -2064,12 +2123,12 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: JT.primary.withValues(alpha: 0.12),
+                  color: const Color(0xFF2C95F1).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: JT.primary.withValues(alpha: 0.3)),
+                  border: Border.all(color: const Color(0xFF2C95F1).withValues(alpha: 0.3)),
                 ),
                 child: const Text('Night fare', style: TextStyle(
-                  fontSize: 10, color: JT.primary, fontWeight: FontWeight.w400)),
+                  fontSize: 10, color: Color(0xFF2C95F1), fontWeight: FontWeight.w400)),
               )
             else
               Text('Incl. GST', style: TextStyle(fontSize: 10, color: Colors.grey[400], fontWeight: FontWeight.w500)),
@@ -2100,17 +2159,17 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
                 margin: const EdgeInsets.symmetric(vertical: 4),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: JT.parcelGold.withValues(alpha: 0.08),
+                  color: const Color(0xFF10B981).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: JT.parcelGold.withValues(alpha: 0.2)),
+                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.2)),
                 ),
                 child: Row(children: [
-                  Icon(Icons.person_2_rounded, size: 13, color: JT.parcelGold),
+                  const Icon(Icons.person_2_rounded, size: 13, color: Color(0xFF10B981)),
                   const SizedBox(width: 6),
                   Expanded(child: Text('Helper Charge (loading/unloading)',
                     style: TextStyle(fontSize: 11, color: textSub))),
                   Text('₹${helperCharge.toStringAsFixed(0)}',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: JT.parcelGold)),
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF10B981))),
                 ]),
               )
             else if (!_isParcel && helperCharge > 0)
@@ -2119,7 +2178,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             if (isNight) ...[
               const SizedBox(height: 2),
               Row(children: [
-                Icon(Icons.nightlight_round, size: 12, color: JT.primary),
+                const Icon(Icons.nightlight_round, size: 12, color: Color(0xFF2C95F1)),
                 const SizedBox(width: 5),
                 Text('Night fare applies (1.0x–1.25x)',
                   style: TextStyle(fontSize: 11, color: textSub, fontStyle: FontStyle.italic)),
@@ -2137,8 +2196,6 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
             ],
             Divider(height: 18, color: borderCol, thickness: 1),
             _fareRow('GST (5%)', '₹${gst.toStringAsFixed(0)}', textSub: textSub),
-            if (_autoDiscountAmount > 0 && _appliedPromo == null)
-              _fareRow(_autoDiscountName ?? 'Auto Discount', '-₹${_autoDiscountAmount.toInt()}', positive: true, textSub: textSub),
             if (_promoDiscount > 0)
               _fareRow('Promo Discount', '-₹${_promoDiscount.toInt()}', positive: true, textSub: textSub),
             const SizedBox(height: 8),
@@ -2152,7 +2209,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
               const Spacer(),
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Text('₹${_finalFare.toStringAsFixed(0)}',
-                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w500, color: _moduleAccent)),
+                  style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w500, color: JT.primary)),
                 Text('incl. GST', style: TextStyle(fontSize: 10, color: Colors.grey[400])),
               ]),
             ]),
@@ -2187,17 +2244,17 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xFF86EFAC))),
         child: Row(children: [
-          Icon(Icons.local_offer_rounded, color: _moduleAccent, size: 18),
+          const Icon(Icons.local_offer_rounded, color: Color(0xFF16A34A), size: 18),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('$_appliedPromo applied!',
-              style: TextStyle(fontWeight: FontWeight.w500, color: _moduleAccent, fontSize: 13)),
+              style: const TextStyle(fontWeight: FontWeight.w500, color: Color(0xFF16A34A), fontSize: 13)),
             Text('You save ₹${_promoDiscount.toInt()}',
               style: TextStyle(color: Colors.green[700], fontSize: 12)),
           ])),
           GestureDetector(
             onTap: () => setState(() { _appliedPromo = null; _promoDiscount = 0; _promoCtrl.clear(); }),
-            child: Icon(Icons.close_rounded, color: _moduleAccent, size: 20)),
+            child: const Icon(Icons.close_rounded, color: Color(0xFF16A34A), size: 20)),
         ]),
       );
     }
@@ -2208,7 +2265,7 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         border: Border.all(color: borderCol)),
       child: Column(children: [
         Row(children: [
-          Icon(Icons.local_offer_outlined, color: _moduleAccent, size: 18),
+          const Icon(Icons.local_offer_outlined, color: JT.primary, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: TextField(
@@ -2225,8 +2282,8 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
           GestureDetector(
             onTap: _promoLoading ? null : _applyPromo,
             child: _promoLoading
-              ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _moduleAccent))
-              : Text('APPLY', style: TextStyle(color: _moduleAccent, fontSize: 13, fontWeight: FontWeight.w400)),
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: JT.primary))
+              : const Text('APPLY', style: TextStyle(color: JT.primary, fontSize: 13, fontWeight: FontWeight.w400)),
           ),
         ]),
         if (_promoError != null)
@@ -2285,14 +2342,14 @@ class _BookingScreenState extends State<BookingScreen> with TickerProviderStateM
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: isSelected
             ? BoxDecoration(
-                gradient: _isParcel ? JT.parcelGrad : JT.grad,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF2C95F1), Color(0xFF6366F1)], 
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
-                  BoxShadow(
-                      color: (_isParcel ? JT.parcelGold : JT.primary)
-                          .withValues(alpha: 0.3),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4)),
+                  BoxShadow(color: const Color(0xFF2C95F1).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
                 ],
               )
             : null,

@@ -170,10 +170,15 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     opacity: _logoOpacity.value,
                     child: Transform.scale(scale: _logoScale.value, child: child),
                   ),
-                  child: JT.logoWhite(height: 100),
+                  child: JT.brandBadge(
+                    dark: true,
+                    logoHeight: 30,
+                    padding: 14,
+                    radius: 22,
+                  ),
                 ),
 
-                const SizedBox(height: 28),
+                const SizedBox(height: 22),
 
                 // Tagline — slide up + fade
                 AnimatedBuilder(
@@ -186,7 +191,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     Text(
                       'Pilot Partner App',
                       style: GoogleFonts.poppins(
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: FontWeight.w500,
                         color: Colors.white,
                         letterSpacing: 0.3,
@@ -196,7 +201,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     Text(
                       'Drive. Earn. Grow.',
                       style: GoogleFonts.poppins(
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: FontWeight.w400,
                         color: Colors.white.withValues(alpha: 0.72),
                       ),
@@ -222,13 +227,13 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     minHeight: 2,
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 Text(
                   'Mindwhile IT Solutions Pvt Ltd',
                   style: GoogleFonts.poppins(
                     color: Colors.white.withValues(alpha: 0.45),
-                    fontSize: 11,
-                    letterSpacing: 0.8,
+                  fontSize: 10,
+                    letterSpacing: 0.6,
                   ),
                 ),
                 const SizedBox(height: 28),

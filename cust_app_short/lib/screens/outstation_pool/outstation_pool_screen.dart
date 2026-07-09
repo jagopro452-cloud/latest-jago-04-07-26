@@ -2,10 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:uuid/uuid.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/vehicle_artwork.dart';
+import '../tracking/tracking_screen.dart';
 
 class OutstationPoolScreen extends StatefulWidget {
   const OutstationPoolScreen({super.key});
@@ -51,11 +52,9 @@ class _OutstationPoolScreenState extends State<OutstationPoolScreen>
       ),
       body: TabBarView(
         controller: _tabs,
-        children: [
-          _SearchTab(
-            onBooked: () => _tabs.animateTo(1),
-          ),
-          const _BookingsTab(),
+        children: const [
+          _SearchTab(),
+          _BookingsTab(),
         ],
       ),
     );
@@ -65,8 +64,7 @@ class _OutstationPoolScreenState extends State<OutstationPoolScreen>
 // ── Search Tab ────────────────────────────────────────────────────────────────
 
 class _SearchTab extends StatefulWidget {
-  final VoidCallback? onBooked;
-  const _SearchTab({this.onBooked});
+  const _SearchTab();
   @override
   State<_SearchTab> createState() => _SearchTabState();
 }
@@ -245,7 +243,14 @@ class _SearchTabState extends State<_SearchTab> {
               padding: const EdgeInsets.all(32),
               child: Column(
                 children: [
-                  Icon(Icons.directions_car_rounded, size: 64, color: JT.textSecondary.withValues(alpha: 0.4)),
+                  Opacity(
+                    opacity: 0.4,
+                    child: VehicleArtwork(
+                      vehicleKey: 'outstation',
+                      width: 64,
+                      height: 64,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   Text('No rides found', style: TextStyle(fontSize: 16, color: JT.textSecondary)),
                   const SizedBox(height: 6),
@@ -255,7 +260,7 @@ class _SearchTabState extends State<_SearchTab> {
             ),
           ),
 
-        ..._results.map((r) => _RideCard(ride: r as Map<String, dynamic>, onBooked: widget.onBooked)),
+        ..._results.map((r) => _RideCard(ride: r as Map<String, dynamic>)),
       ],
     );
   }
@@ -277,8 +282,7 @@ class _SearchTabState extends State<_SearchTab> {
 
 class _RideCard extends StatelessWidget {
   final Map<String, dynamic> ride;
-  final VoidCallback? onBooked;
-  const _RideCard({required this.ride, this.onBooked});
+  const _RideCard({required this.ride});
 
   @override
   Widget build(BuildContext context) {
@@ -428,12 +432,7 @@ class _RideCard extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _BookBottomSheet(
-        ride: ride,
-        farePerSeat: farePerSeat,
-        maxSeats: maxSeats,
-        onBooked: onBooked,
-      ),
+      builder: (_) => _BookBottomSheet(ride: ride, farePerSeat: farePerSeat, maxSeats: maxSeats),
     );
   }
 }
@@ -444,13 +443,7 @@ class _BookBottomSheet extends StatefulWidget {
   final Map<String, dynamic> ride;
   final double farePerSeat;
   final int maxSeats;
-  final VoidCallback? onBooked;
-  const _BookBottomSheet({
-    required this.ride,
-    required this.farePerSeat,
-    required this.maxSeats,
-    this.onBooked,
-  });
+  const _BookBottomSheet({required this.ride, required this.farePerSeat, required this.maxSeats});
   @override
   State<_BookBottomSheet> createState() => _BookBottomSheetState();
 }
@@ -469,6 +462,25 @@ class _BookBottomSheetState extends State<_BookBottomSheet> {
     super.dispose();
   }
 
+  Future<String?> _fetchLatestBookingId() async {
+    try {
+      final headers = await AuthService.getHeaders();
+      final res = await http.get(
+        Uri.parse(ApiConfig.outstationPoolBookings),
+        headers: headers,
+      ).timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return null;
+      final list = (jsonDecode(res.body) as Map<String, dynamic>)['data'] as List<dynamic>? ?? [];
+      for (final item in list) {
+        if (item is! Map) continue;
+        final status = item['status']?.toString().toLowerCase() ?? '';
+        final id = item['id']?.toString() ?? '';
+        if (id.isNotEmpty && status != 'cancelled') return id;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<void> _book() async {
     if (_seats < 1 || _seats > widget.maxSeats) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -485,22 +497,24 @@ class _BookBottomSheetState extends State<_BookBottomSheet> {
       ));
       return;
     }
+    if (_paymentMethod == 'upi') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('UPI prepaid is available on instant city rides. Use Cash or Wallet here.'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
     setState(() => _booking = true);
     try {
       final headers = await AuthService.getHeaders();
-      final idempotencyKey = const Uuid().v4();
       final res = await http.post(
         Uri.parse(ApiConfig.outstationPoolBook),
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
-        },
+        headers: {...headers, 'Content-Type': 'application/json'},
         body: jsonEncode({
           'rideId': rideId,
           'seatsBooked': _seats,
           'paymentMethod': _paymentMethod,
-          'idempotencyKey': idempotencyKey,
           if (_pickupCtrl.text.trim().isNotEmpty) 'pickupAddress': _pickupCtrl.text.trim(),
           if (_dropCtrl.text.trim().isNotEmpty) 'dropoffAddress': _dropCtrl.text.trim(),
         }),
@@ -513,13 +527,29 @@ class _BookBottomSheetState extends State<_BookBottomSheet> {
       }
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       if (res.statusCode == 200 && body['success'] == true) {
+        final booking = body['booking'] as Map<String, dynamic>?;
+        var bookingId = booking?['id']?.toString() ?? '';
+        if (bookingId.isEmpty) {
+          bookingId = await _fetchLatestBookingId() ?? '';
+        }
+        if (!mounted) return;
         Navigator.of(context).pop();
-        widget.onBooked?.call();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Booking confirmed!'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ));
+        if (bookingId.isNotEmpty) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => TrackingScreen(
+                tripId: bookingId,
+                bookingType: 'outstation',
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Booking confirmed but tracking unavailable. Open My Bookings.'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(body['message'] ?? 'Booking failed'),
@@ -701,58 +731,6 @@ class _BookingsTabState extends State<_BookingsTab> {
     _load();
   }
 
-  Future<void> _cancelBooking(String bookingId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Cancel Booking?'),
-        content: const Text('This will cancel your seat reservation. Refund (if applicable) will be processed to your wallet within 24 hours.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: JT.error),
-            child: const Text('Cancel Booking'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      final headers = await AuthService.getHeaders();
-      final res = await http.post(
-        Uri.parse(ApiConfig.outstationPoolCancelBooking(bookingId)),
-        headers: {...headers, 'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 15));
-      if (!mounted) return;
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        final refund = data['refundAmount'];
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(refund != null
-              ? 'Booking cancelled. ₹${refund.toString()} refund initiated.'
-              : 'Booking cancelled.'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ));
-        _load();
-      } else {
-        final msg = (jsonDecode(res.body) as Map<String, dynamic>)['message']?.toString() ?? 'Could not cancel. Please try again.';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(msg),
-          backgroundColor: JT.error,
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
-    } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Network error. Please try again.'),
-        backgroundColor: Colors.orange,
-        behavior: SnackBarBehavior.floating,
-      ));
-    }
-  }
-
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
@@ -789,6 +767,34 @@ class _BookingsTabState extends State<_BookingsTab> {
       }
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _cancelBooking(String bookingId) async {
+    if (bookingId.isEmpty) return;
+    try {
+      final headers = await AuthService.getHeaders();
+      final res = await http.post(
+        Uri.parse(ApiConfig.outstationPoolCancelBooking(bookingId)),
+        headers: headers,
+        body: jsonEncode({'reason': 'Customer cancelled'}),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Booking cancelled')),
+        );
+        _load();
+      } else {
+        final msg = jsonDecode(res.body)['message']?.toString() ?? 'Cancel failed';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Network error')),
+        );
+      }
+    }
   }
 
   Color _statusColor(String? s) {
@@ -901,20 +907,37 @@ class _BookingsTabState extends State<_BookingsTab> {
                   const SizedBox(height: 4),
                   Text('Booked: $formattedCreated', style: TextStyle(fontSize: 11, color: JT.textSecondary.withValues(alpha: 0.7))),
                 ],
-                if (status == 'confirmed') ...[
+                if (status == 'pending' || status == 'confirmed' || status == 'searching' || status == 'picked_up') ...[
                   const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () => _cancelBooking(b['id']?.toString() ?? ''),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: JT.error,
-                        side: BorderSide(color: JT.error.withValues(alpha: 0.5)),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            final id = b['id']?.toString() ?? b['bookingId']?.toString() ?? '';
+                            if (id.isEmpty) return;
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => TrackingScreen(
+                                  tripId: id,
+                                  bookingType: 'outstation',
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.map_rounded, size: 16),
+                          label: const Text('Track'),
+                        ),
                       ),
-                      child: const Text('Cancel Booking', style: TextStyle(fontSize: 13)),
-                    ),
+                      if (status == 'pending' || status == 'confirmed' || status == 'searching') ...[
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () => _cancelBooking(b['id']?.toString() ?? b['bookingId']?.toString() ?? ''),
+                          child: Text('Cancel', style: TextStyle(color: JT.error, fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ],
                   ),
                 ],
               ],

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +7,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
+import '../../services/api_retry.dart';
 import '../../services/auth_service.dart';
 
 class WalletScreen extends StatefulWidget {
@@ -53,18 +53,7 @@ class _WalletScreenState extends State<WalletScreen>
     super.dispose();
   }
 
-  static String _generateIdempotencyKey() {
-    final rnd = Random.secure();
-    final bytes = List.generate(16, (_) => rnd.nextInt(256));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
-    String hex(int b) => b.toRadixString(16).padLeft(2, '0');
-    return '${bytes.sublist(0, 4).map(hex).join()}-'
-        '${bytes.sublist(4, 6).map(hex).join()}-'
-        '${bytes.sublist(6, 8).map(hex).join()}-'
-        '${bytes.sublist(8, 10).map(hex).join()}-'
-        '${bytes.sublist(10).map(hex).join()}';
-  }
+  static String _generateIdempotencyKey() => generateIdempotencyKey();
 
   Map<String, dynamic> _safeBody(String raw) {
     try {
@@ -77,7 +66,7 @@ class _WalletScreenState extends State<WalletScreen>
   Future<void> _fetchWallet() async {
     try {
       final headers = await AuthService.getHeaders();
-      final res = await http.get(Uri.parse(ApiConfig.wallet), headers: headers).timeout(const Duration(seconds: 10));
+      final res = await http.get(Uri.parse(ApiConfig.wallet), headers: headers);
       if (res.statusCode == 200) {
         if (mounted) {
           setState(() {
@@ -199,24 +188,16 @@ class _WalletScreenState extends State<WalletScreen>
         final headers = await AuthService.getHeaders();
         final res = await http.post(
           Uri.parse(ApiConfig.walletVerifyPayment),
-          headers: {
-            ...headers,
-            'Content-Type': 'application/json',
-            if (_pendingIdempotencyKey != null)
-              'Idempotency-Key': _pendingIdempotencyKey!,
-          },
+          headers: {...headers, 'Content-Type': 'application/json'},
           body: jsonEncode({
             'razorpayOrderId': response.orderId,
             'razorpayPaymentId': response.paymentId,
             'razorpaySignature': response.signature,
-            if (_pendingIdempotencyKey != null)
-              'idempotencyKey': _pendingIdempotencyKey,
           }),
         ).timeout(const Duration(seconds: 15));
         final body = _safeBody(res.body);
         if (!mounted) return;
-        // 409 = already processed (Razorpay webhook beat the app) — treat as success
-        if (res.statusCode == 200 || res.statusCode == 409) {
+        if (res.statusCode == 200) {
           _showSnack(
               body['message'] ??
                   '₹${_pendingAmount?.toStringAsFixed(0)} added to wallet!',
@@ -224,7 +205,7 @@ class _WalletScreenState extends State<WalletScreen>
           _fetchWallet();
           return;
         } else if (res.statusCode >= 400 && res.statusCode < 500) {
-          // Other 4xx client error — no point retrying
+          // Client error — no point retrying
           _showSnack(
               body['message']?.toString() ??
                   'Payment completed but verification failed.',
@@ -453,7 +434,7 @@ class _WalletScreenState extends State<WalletScreen>
           ),
         ),
       ),
-    ).then((_) => customCtrl.dispose());
+    );
   }
 
   @override

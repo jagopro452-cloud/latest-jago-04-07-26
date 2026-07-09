@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../config/jago_theme.dart';
+import '../../widgets/vehicle_artwork.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -52,7 +53,7 @@ class _TripsHistoryScreenState extends State<TripsHistoryScreen>
     setState(() => _loading = true);
     final headers = await AuthService.getHeaders();
     try {
-      final res = await http.get(Uri.parse(ApiConfig.trips), headers: headers).timeout(const Duration(seconds: 10));
+      final res = await http.get(Uri.parse(ApiConfig.trips), headers: headers);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) {
@@ -94,7 +95,7 @@ class _TripsHistoryScreenState extends State<TripsHistoryScreen>
     try {
       final headers = await AuthService.getHeaders();
       final res = await http.get(Uri.parse(ApiConfig.tripReceipt(tripId)),
-          headers: headers).timeout(const Duration(seconds: 10));
+          headers: headers);
       if (!mounted) return;
       Navigator.pop(ctx);
       if (res.statusCode == 200) {
@@ -290,10 +291,35 @@ class _TripsHistoryScreenState extends State<TripsHistoryScreen>
                           const SizedBox(width: 10),
                         if (vehicle['name'] != null)
                           Expanded(
-                              child: _infoChip(
-                                  Icons.directions_car_rounded,
-                                  '${vehicle['name']} ${vehicle['number'] ?? ''}',
-                                  const Color(0xFF1A6FDB))),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1A6FDB).withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFF1A6FDB).withValues(alpha: 0.2)),
+                              ),
+                              child: Row(children: [
+                                VehicleArtwork(
+                                  vehicleKey: vehicle['vehicleKey'] ?? vehicle['name'] ?? 'cab',
+                                  width: 24,
+                                  height: 24,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '${vehicle['name']} ${vehicle['number'] ?? ''}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w400,
+                                      color: const Color(0xFF1A6FDB),
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ]),
+                            ),
+                          ),
                       ]),
                     if ((r['distanceKm'] ?? 0) > 0) ...[
                       const SizedBox(height: 10),

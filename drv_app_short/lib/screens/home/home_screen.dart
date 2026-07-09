@@ -7,9 +7,9 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../../widgets/jago_map_markers.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
@@ -25,23 +25,19 @@ import '../../services/alarm_service.dart';
 import '../../services/trip_service.dart';
 import '../../widgets/incoming_trip_sheet.dart';
 import '../../widgets/incoming_parcel_sheet.dart';
-import '../../widgets/jago_map_markers.dart';
 import '../../services/fcm_service.dart';
 import '../auth/login_screen.dart';
 import '../auth/pending_verification_screen.dart';
 import '../wallet/wallet_screen.dart';
 import '../history/trips_history_screen.dart';
 import '../profile/profile_screen.dart';
-import '../break_mode/break_mode_screen.dart';
 import '../fatigue/fatigue_screen.dart';
 import '../trip/trip_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../referral/referral_screen.dart';
 import '../profile/support_chat_screen.dart';
 import '../onboarding/model_selection_screen.dart';
-import '../onboarding/subscription_plans_screen.dart';
 import '../earnings/earnings_screen.dart';
-import '../kyc/kyc_documents_screen.dart';
 import '../parcel/parcel_delivery_screen.dart';
 import '../outstation_pool/outstation_pool_driver_screen.dart';
 import '../car_sharing/pool_driver_screen.dart';
@@ -55,7 +51,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final SocketService _socket = SocketService();
-  GoogleMapController? _mapController;
+  final JagoMapController _mapController = JagoMapController();
   LatLng _center = const LatLng(17.3850, 78.4867);
   bool _isOnline = false;
   bool _toggling = false;
@@ -551,7 +547,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     if (!mounted) return;
     setState(() => _center = LatLng(pos.latitude, pos.longitude));
     if (animate) {
-      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(_center, 15));
+      _mapController.moveZoom(_center, 15);
     }
   }
 
@@ -925,7 +921,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       final newCenter = LatLng(pos.latitude, pos.longitude);
       if (mounted) {
         setState(() => _center = newCenter);
-        _mapController?.animateCamera(CameraUpdate.newLatLng(newCenter));
+        _mapController.move(newCenter);
       }
     }, onError: (_) {});
 
@@ -949,7 +945,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         Uri.parse(ApiConfig.driverLocation),
         headers: reqHeaders,
         body: jsonEncode({'lat': lat, 'lng': lng, 'isOnline': true}),
-      ).catchError((_) => http.Response('', 500));
+      ).timeout(const Duration(seconds: 4)).catchError((_) => http.Response('', 500));
 
     });
   }
@@ -1198,8 +1194,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context);
-              _mapController?.animateCamera(CameraUpdate.newLatLngZoom(
-                LatLng(sugg.lat, sugg.lng), 14));
+              _mapController.moveZoom(LatLng(sugg.lat, sugg.lng), 14);
             },
             icon: const Icon(Icons.navigation_rounded, size: 16),
             label: const Text('Go There'),
@@ -1650,18 +1645,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             // Full-screen map (Deferred to prevent stutter)
             if (_mapReadyToLoad)
               Positioned.fill(
-                child: GoogleMap(
+                child: JagoMapView(
+                  controller: _mapController,
                   initialCameraPosition: CameraPosition(target: _center, zoom: 14),
-                  onMapCreated: (c) {
-                    _mapController = c;
+                  onMapCreated: (_) {
                     if (_hasValidLocationFix) {
-                      c.animateCamera(CameraUpdate.newLatLngZoom(_center, 15));
+                      _mapController.moveZoom(_center, 15);
                     }
                   },
-                  myLocationEnabled: true,
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: false,
-                  mapToolbarEnabled: false,
                   markers: {
                     if (_driverLocationMarkerIcon != null)
                       Marker(
@@ -1771,7 +1762,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     final icon = zone.demandLevel == 'high' ? Icons.local_fire_department_rounded : Icons.trending_up_rounded;
 
     return GestureDetector(
-      onTap: () => _mapController?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(zone.lat, zone.lng), 15)),
+      onTap: () => _mapController.moveZoom(LatLng(zone.lat, zone.lng), 15),
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -1904,7 +1895,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
               alignment: Alignment.topCenter,
               child: Padding(
                 padding: const EdgeInsets.only(top: 12),
-                child: JT.logoBlue(height: 64),
+                child: JT.logoBlue(height: 28),
               ),
             ),
           ),

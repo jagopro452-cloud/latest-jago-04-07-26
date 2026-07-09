@@ -20,7 +20,6 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
   bool _loading = false;
   bool _showPassword = false;
   bool _showConfirm = false;
-  String _gender = 'female';
 
   late AnimationController _slideCtrl;
   late Animation<Offset> _slideAnim;
@@ -77,7 +76,7 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
     if (!_isStrongPassword(password)) { _showSnack('Use 8+ chars with upper, lower and number', error: true); return; }
     if (password != confirm) { _showSnack('Passwords do not match', error: true); return; }
     setState(() => _loading = true);
-    final res = await AuthService.registerWithPassword(phone, password, name, email: _emailCtrl.text.trim(), gender: _gender);
+    final res = await AuthService.registerWithPassword(phone, password, name, email: _emailCtrl.text.trim());
     if (!mounted) return;
     setState(() => _loading = false);
     if (res['success'] == true) {
@@ -157,22 +156,6 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
                 _buildLabel('Phone Number'),
                 const SizedBox(height: 8),
                 _buildPhoneInput(),
-                const SizedBox(height: 16),
-
-                _buildLabel('Gender'),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(child: _genderChip('female', 'Female', Icons.female)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _genderChip('male', 'Male', Icons.male)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Female users get women drivers first when available nearby.',
-                  style: GoogleFonts.poppins(fontSize: 11, color: const Color(0xFF94A3B8), height: 1.35),
-                ),
                 const SizedBox(height: 16),
 
                 _buildLabel('Email (Optional)'),
@@ -382,29 +365,6 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
             ),
             onPressed: onToggle,
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _genderChip(String value, String label, IconData icon) {
-    final selected = _gender == value;
-    return GestureDetector(
-      onTap: () => setState(() => _gender = value),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: selected ? _blue.withValues(alpha: 0.1) : const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: selected ? _blue : const Color(0xFFE2E8F0)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 18, color: selected ? _blue : const Color(0xFF94A3B8)),
-            const SizedBox(width: 6),
-            Text(label, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: selected ? _blue : const Color(0xFF64748B))),
-          ],
         ),
       ),
     );

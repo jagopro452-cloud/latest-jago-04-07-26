@@ -76,7 +76,7 @@ class _MainScreenState extends State<MainScreen> {
     ));
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F7FF), // Match lavender theme
+      backgroundColor: JT.bg,
       body: Column(
         children: [
           // Global Header
@@ -90,7 +90,7 @@ class _MainScreenState extends State<MainScreen> {
                   // Jago Logo
                   GestureDetector(
                     onTap: () => setState(() => _currentIndex = 3), // Navigate to Profile
-                    child: JT.logoBlue(height: 56),
+                    child: JT.logoBlue(height: 22),
                   ),
                   
                   // Actions: Wallet & Notifications
@@ -115,7 +115,7 @@ class _MainScreenState extends State<MainScreen> {
                           child: Stack(
                             alignment: Alignment.center,
                             children: [
-                              const Icon(Icons.notifications_none_rounded, color: Color(0xFF64748B), size: 24),
+                              const Icon(Icons.notifications_none_rounded, color: JT.textSecondary, size: 24),
                               if (_unreadNotifCount > 0) 
                                 Positioned(
                                   top: 12,
@@ -211,13 +211,14 @@ class _MainScreenState extends State<MainScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: isSelected
             ? BoxDecoration(
-                gradient: JT.grad,
+                gradient: const LinearGradient(
+                  colors: [JT.primary, JT.primaryDark],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
-                  BoxShadow(
-                      color: JT.primary.withValues(alpha: 0.3),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4)),
+                  BoxShadow(color: JT.primary.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
                 ],
               )
             : null,
@@ -226,7 +227,7 @@ class _MainScreenState extends State<MainScreen> {
           children: [
             Icon(
               isSelected ? activeIcon : inactiveIcon,
-              color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+              color: isSelected ? Colors.white : JT.textTertiary,
               size: 22,
             ),
             if (isSelected) ...[

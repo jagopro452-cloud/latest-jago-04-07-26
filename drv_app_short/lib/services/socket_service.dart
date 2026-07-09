@@ -6,6 +6,7 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
 import 'secure_token_store.dart';
+import 'auth_service.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
@@ -290,6 +291,13 @@ class SocketService {
     });
     _socket!.on('call:rejected', (data) {
       _callRejectedController.add(Map<String, dynamic>.from(data));
+    });
+
+    // Admin force-logout: account locked/banned — log out immediately.
+    _socket!.on('system:force_logout', (data) {
+      final reason = (data is Map ? data['reason'] : null) ?? 'Account suspended';
+      debugPrint('[SOCKET] system:force_logout received: $reason');
+      AuthService.handle401();
     });
 
     // Ping/pong: server pings driver to confirm still active; auto-respond immediately.

@@ -19,8 +19,12 @@ if (localPropertiesFile.exists()) {
 
 def mapsApiKey =
         (localProperties.getProperty('googleMapsApiKey')
+        ?: System.getenv('GOOGLE_MAPS_ANDROID_KEY')
         ?: System.getenv('GOOGLE_MAPS_API_KEY')
         ?: '').trim()
+if (mapsApiKey.isEmpty()) {
+    logger.warn("googleMapsApiKey missing — set in android/local.properties or GOOGLE_MAPS_ANDROID_KEY env for release builds")
+}
 
 def flutterVersionCode = (localProperties.getProperty('flutter.versionCode') ?: '59').toInteger()
 def flutterVersionName = (localProperties.getProperty('flutter.versionName') ?: '1.0.59')

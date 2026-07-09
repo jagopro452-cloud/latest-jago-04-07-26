@@ -3,6 +3,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../config/jago_theme.dart';
 import '../main_screen.dart';
 import 'dart:convert';
+import '../tracking/tracking_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../chat/trip_chat_sheet.dart';
 import 'package:http/http.dart' as http;
 import '../../services/auth_service.dart';
 import '../../config/api_config.dart';
@@ -11,11 +14,13 @@ import 'package:flutter/services.dart';
 class TripCompletionScreen extends StatefulWidget {
   final Map<String, dynamic> trip;
   final double walletPendingAmount;
+  final bool isParcel;
 
   const TripCompletionScreen({
     super.key,
     required this.trip,
     this.walletPendingAmount = 0.0,
+    this.isParcel = false,
   });
 
   @override
@@ -74,7 +79,7 @@ class _TripCompletionScreenState extends State<TripCompletionScreen> {
                         (_) => false,
                       );
                     },
-                    child: JT.logoBlue(height: 56),
+                    child: JT.logoBlue(height: 32),
                   ),
                   
                   // Actions: Wallet & Notifications
@@ -151,7 +156,7 @@ class _TripCompletionScreenState extends State<TripCompletionScreen> {
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  'Your ride is ended',
+                                  widget.isParcel ? 'Delivery completed' : 'Your ride is ended',
                                   style: GoogleFonts.poppins(
                                     fontSize: 18,
                                     fontWeight: FontWeight.w700,
@@ -378,33 +383,63 @@ class _TripCompletionScreenState extends State<TripCompletionScreen> {
   }
 
   Widget _buildActionRow(String driverName) {
+    final tripId = widget.trip['id']?.toString() ?? '';
+    final driverPhone = widget.trip['driverPhone']?.toString() ??
+        widget.trip['driver_phone']?.toString() ?? '';
     return Row(
       children: [
         Expanded(
-          child: Container(
-            height: 52,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.chat_bubble_outline, size: 20, color: Color(0xFF94A3B8)),
-                const SizedBox(width: 12),
-                Text(
-                  'Message $driverName...',
-                  style: GoogleFonts.poppins(color: const Color(0xFF94A3B8), fontSize: 13),
-                ),
-              ],
+          child: GestureDetector(
+            onTap: tripId.isEmpty ? null : () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => TripChatSheet(tripId: tripId, senderName: 'You'),
+              );
+            },
+            child: Container(
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.chat_bubble_outline, size: 20, color: Color(0xFF94A3B8)),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Message $driverName...',
+                    style: GoogleFonts.poppins(color: const Color(0xFF94A3B8), fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
         const SizedBox(width: 12),
-        _iconBtn(Icons.call_outlined, const Color(0xFF2D8CFF), const Color(0xFFE0F2FE)),
+        GestureDetector(
+          onTap: driverPhone.isNotEmpty ? () => launchUrl(Uri.parse('tel:$driverPhone')) : null,
+          child: _iconBtn(Icons.call_outlined, JT.primary, JT.primaryLight),
+        ),
         const SizedBox(width: 12),
-        _iconBtn(Icons.sos, const Color(0xFFEF4444), const Color(0xFFFEF2F2)),
+        GestureDetector(
+          onTap: () async {
+            try {
+              final headers = await AuthService.getHeaders();
+              await http.post(Uri.parse(ApiConfig.sos), headers: headers,
+                body: jsonEncode({'tripId': tripId, 'message': 'SOS after trip completion'}));
+            } catch (_) {}
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('SOS alert sent. Help is on the way.')),
+              );
+            }
+          },
+          child: _iconBtn(Icons.sos, JT.error, JT.errorLight),
+        ),
       ],
     );
   }
@@ -503,9 +538,9 @@ class _TripCompletionScreenState extends State<TripCompletionScreen> {
               ),
               Text(
                 '₹${actualFare.toString()}',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.poppins(
                   fontSize: 24,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w700,
                   color: const Color(0xFF2D8CFF),
                 ),
               ),
@@ -582,7 +617,7 @@ class _TripCompletionScreenState extends State<TripCompletionScreen> {
           'driverId': widget.trip['driverId']?.toString() ?? widget.trip['driver_id']?.toString(),
           'rating': stars,
         }),
-      ).timeout(const Duration(seconds: 10));
+      );
     } catch (e) {
       debugPrint('Rating failed: $e');
     }

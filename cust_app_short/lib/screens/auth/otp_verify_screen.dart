@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -20,13 +21,12 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
   final List<FocusNode> _nodes = List.generate(6, (_) => FocusNode());
   bool _loading = false;
   int _resendSeconds = 30;
-  late final _timer = Stream.periodic(const Duration(seconds: 1));
 
   @override
   void initState() {
     super.initState();
     _startResendTimer();
-    if (widget.devOtp != null) {
+    if (kDebugMode && widget.devOtp != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Dev OTP: ${widget.devOtp}', style: GoogleFonts.poppins(color: Colors.white)),

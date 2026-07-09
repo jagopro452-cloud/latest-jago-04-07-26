@@ -186,7 +186,7 @@ class _RideForWhomScreenState extends State<RideForWhomScreen> {
                 children: [
                   GestureDetector(
                     onTap: () => Navigator.pop(context),
-                    child: JT.logoBlue(height: 56),
+                    child: JT.logoBlue(height: 32),
                   ),
                   Row(
                     children: [
@@ -365,13 +365,14 @@ class _RideForWhomScreenState extends State<RideForWhomScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: isSelected
             ? BoxDecoration(
-                gradient: JT.grad,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF2C95F1), Color(0xFF6366F1)], 
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
-                  BoxShadow(
-                      color: JT.primary.withValues(alpha: 0.3),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4)),
+                  BoxShadow(color: const Color(0xFF2C95F1).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
                 ],
               )
             : null,

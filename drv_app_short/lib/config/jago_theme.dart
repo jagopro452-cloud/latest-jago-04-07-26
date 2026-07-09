@@ -78,5 +78,32 @@ class JT {
 
   static Widget logoWhite({double height = 36}) =>
       SvgPicture.asset('assets/images/pilot_logo_full_white.svg', height: height, fit: BoxFit.contain);
-}
 
+  static Widget brandBadge({
+    bool dark = false,
+    double logoHeight = 28,
+    double padding = 12,
+    double radius = 18,
+  }) {
+    return Container(
+      padding: EdgeInsets.all(padding),
+      decoration: BoxDecoration(
+        color: dark ? Colors.white.withValues(alpha: 0.18) : Colors.white,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: dark ? Colors.white.withValues(alpha: 0.28) : AppColors.border,
+        ),
+        boxShadow: dark
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+      ),
+      child: dark ? logoWhite(height: logoHeight) : logoBlue(height: logoHeight),
+    );
+  }
+}
