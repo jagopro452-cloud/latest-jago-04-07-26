@@ -337,6 +337,12 @@ class JagoMapController {
   void moveZoom(LatLng target, double zoom) {
     _inner?.move(ll.LatLng(target.latitude, target.longitude), zoom);
   }
+  // Smooth follow: moves camera without changing zoom (Porter/Rapido style follow)
+  void animateTo(LatLng target) {
+    final m = _inner;
+    if (m == null) return;
+    m.move(ll.LatLng(target.latitude, target.longitude), m.camera.zoom);
+  }
   void fitBounds(LatLngBounds bounds, {double padding = 48}) {
     _inner?.fitCamera(fmap.CameraFit.bounds(
       bounds: fmap.LatLngBounds(

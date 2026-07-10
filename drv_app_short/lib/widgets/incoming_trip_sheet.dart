@@ -107,6 +107,11 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
     final fare = trip['estimatedFare'] ?? '121';
     final extra = trip['incentive'] ?? '13';
     final vehicleType = (trip['vehicleCategoryName'] ?? 'Bike').toString();
+    final paymentMethod = (trip['paymentMethod'] ?? trip['payment_method'] ?? 'cash').toString();
+    final customerRating = double.tryParse(trip['customerRating']?.toString() ?? trip['customer_rating']?.toString() ?? '') ?? 0.0;
+    final etaMinutes = trip['etaMinutes'] ?? trip['eta_minutes'];
+    final pickupLandmark = (trip['pickupLandmark'] ?? trip['pickup_landmark'] ?? '').toString().trim();
+    final destLandmark = (trip['destinationLandmark'] ?? trip['destination_landmark'] ?? '').toString().trim();
 
     return PopScope(
       canPop: false,
@@ -139,6 +144,11 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                             dest: dest,
                             pickupDist: pickupDist,
                             tripDist: tripDist,
+                            paymentMethod: paymentMethod,
+                            customerRating: customerRating,
+                            etaMinutes: etaMinutes,
+                            pickupLandmark: pickupLandmark,
+                            destLandmark: destLandmark,
                           ),
                         ),
                       ),
@@ -264,6 +274,11 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
     required String dest,
     required dynamic pickupDist,
     required dynamic tripDist,
+    required String paymentMethod,
+    required double customerRating,
+    required dynamic etaMinutes,
+    required String pickupLandmark,
+    required String destLandmark,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -315,6 +330,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Vehicle type chip
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
@@ -332,6 +348,13 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                             ],
                           ),
                         ),
+                        const SizedBox(height: 8),
+                        // Payment method badge
+                        _buildPaymentBadge(paymentMethod),
+                        if (customerRating > 0) ...[
+                          const SizedBox(height: 8),
+                          _buildRatingChip(customerRating),
+                        ],
                         if (extra != null && extra != '0') ...[
                           const SizedBox(height: 8),
                           Text(
@@ -345,14 +368,41 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                         ],
                       ],
                     ),
-                    Text(
-                      '₹$fare',
-                      style: GoogleFonts.poppins(
-                        fontSize: 38,
-                        fontWeight: FontWeight.w900,
-                        color: _jagoBlue,
-                        letterSpacing: -1,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '₹$fare',
+                          style: GoogleFonts.poppins(
+                            fontSize: 38,
+                            fontWeight: FontWeight.w900,
+                            color: _jagoBlue,
+                            letterSpacing: -1,
+                          ),
+                        ),
+                        if (etaMinutes != null) ...[
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF8E1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFFFCC02).withValues(alpha: 0.4)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.access_time_rounded, size: 12, color: Color(0xFFF59E0B)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$etaMinutes min ETA',
+                                  style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFF59E0B)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
@@ -361,7 +411,11 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
               // Card Body: Address Timeline
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _buildAddressTimeline(pickup, dest, pickupDist, tripDist),
+                child: _buildAddressTimeline(
+                  pickup, dest, pickupDist, tripDist,
+                  pickupLandmark: pickupLandmark,
+                  destLandmark: destLandmark,
+                ),
               ),
 
               const SizedBox(height: 24),
@@ -456,11 +510,18 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
     );
   }
 
-  Widget _buildAddressTimeline(String pickup, String dest, dynamic pickupDist, dynamic tripDist) {
+  Widget _buildAddressTimeline(
+    String pickup,
+    String dest,
+    dynamic pickupDist,
+    dynamic tripDist, {
+    String pickupLandmark = '',
+    String destLandmark = '',
+  }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Timeline
+        // Timeline rail
         Column(
           children: [
             const SizedBox(height: 8),
@@ -474,10 +535,9 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                 boxShadow: [BoxShadow(color: _jagoBlue.withValues(alpha: 0.3), blurRadius: 4)],
               ),
             ),
-            // Dynamic connector
             Container(
               width: 2,
-              height: 40,
+              height: pickupLandmark.isNotEmpty ? 56 : 40,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -490,7 +550,7 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
           ],
         ),
         const SizedBox(width: 16),
-        // Texts
+        // Address text
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -506,6 +566,21 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
+              if (pickupLandmark.isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Row(children: [
+                  const Icon(Icons.place_outlined, size: 12, color: Color(0xFF6B7280)),
+                  const SizedBox(width: 3),
+                  Expanded(
+                    child: Text(
+                      pickupLandmark,
+                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w400, color: const Color(0xFF6B7280)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ]),
+              ],
               const SizedBox(height: 24),
               Text(
                 '$tripDist Km trip',
@@ -518,8 +593,67 @@ class _IncomingTripSheetState extends State<IncomingTripSheet> with TickerProvid
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
+              if (destLandmark.isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Row(children: [
+                  const Icon(Icons.place_outlined, size: 12, color: Color(0xFF6B7280)),
+                  const SizedBox(width: 3),
+                  Expanded(
+                    child: Text(
+                      destLandmark,
+                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w400, color: const Color(0xFF6B7280)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ]),
+              ],
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPaymentBadge(String paymentMethod) {
+    final pm = paymentMethod.toLowerCase();
+    final bool isCash = pm == 'cash';
+    final bool isUpi = pm == 'upi' || pm == 'online' || pm == 'razorpay';
+    final Color color = isCash ? const Color(0xFF16A34A) : isUpi ? const Color(0xFF7C3AED) : _jagoBlue;
+    final String label = isCash ? 'Cash' : isUpi ? 'UPI' : 'Wallet';
+    final IconData icon = isCash ? Icons.payments_rounded : isUpi ? Icons.qr_code_rounded : Icons.account_balance_wallet_rounded;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(label, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRatingChip(double rating) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (int i = 1; i <= 5; i++)
+          Icon(
+            i <= rating.round() ? Icons.star_rounded : Icons.star_border_rounded,
+            size: 14,
+            color: Colors.amber,
+          ),
+        const SizedBox(width: 4),
+        Text(
+          rating.toStringAsFixed(1),
+          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: _textGrey),
         ),
       ],
     );

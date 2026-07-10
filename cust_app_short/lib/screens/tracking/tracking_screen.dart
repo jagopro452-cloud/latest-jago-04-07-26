@@ -46,10 +46,11 @@ class _TrackingScreenState extends State<TrackingScreen>
   final JagoMapController _mapController = JagoMapController();
   LatLng _center = const LatLng(17.3850, 78.4867);
   LatLng? _driverLatLng;
+  LatLng? _prevDriverLatLng;   // previous position for bearing calc
+  double _driverBearing = 0.0; // vehicle heading in degrees
   String _status = 'searching';
   Map<String, dynamic>? _trip;
-  double _walletPendingAmount =
-      0; // amount customer still owes after wallet deduction
+  double _walletPendingAmount = 0;
   List<String> _cancelReasons = [];
   late AnimationController _pulseCtrl;
   final Set<Marker> _markers = {};
@@ -58,24 +59,41 @@ class _TrackingScreenState extends State<TrackingScreen>
   final FlutterTts _tts = FlutterTts();
   StreamSubscription? _incomingCallSub;
 
-  // Booking timeout warning (Feature 1) & Boost Fare (Feature 2)
+  // Smooth marker animation (Porter/Rapido style)
+  Timer? _markerAnimTimer;
+  LatLng? _markerAnimFrom;
+  LatLng? _markerAnimTo;
+  double _markerAnimProgress = 1.0;
+
+  // Camera follow: auto-follows driver unless user manually panned
+  bool _userPanned = false;
+  Timer? _cameraCooldownTimer;
+
+  // Route smart refresh: only re-fetch if driver moved >80m from last fetch
+  LatLng? _lastRouteFetchLatLng;
+  static const double _routeRefreshThresholdKm = 0.08; // 80m
+
+  // ETA from last route response
+  int? _etaMinutes;
+
+  // Booking timeout warning & Boost Fare
   Timer? _searchTimeoutTimer;
   Timer? _dispatchRetryTimer;
   Timer? _searchAbortTimer;
   bool _boostLoading = false;
   Timer? _nearbyDriversTimer;
   final Map<String, BitmapDescriptor> _markerIconCache = {};
+  double _devicePixelRatio = 2.5;
   List<Map<String, dynamic>> _nearbyDrivers = [];
 
   bool _isConnected = true;
+  bool _hasEverConnected = false;
   StreamSubscription? _connSub;
   Timer? _pollTimer;
 
-  bool _isArriving = false; // "Pilot is about to arrive" flag
+  bool _isArriving = false;
 
-  String get _mode =>
-      widget.isParcel ? 'parcel' : widget.bookingType;
-
+  String get _mode => widget.isParcel ? 'parcel' : widget.bookingType;
   bool get _isRideMode => _mode == 'ride';
 
   // Custom Top Banner state
@@ -96,9 +114,17 @@ class _TrackingScreenState extends State<TrackingScreen>
         if (mounted) {
           setState(() => _isConnected = connected);
           if (!connected) {
-            _showStatusBanner('Waiting for connection...', Colors.orange);
+            // Only show "Waiting for connection" if we were connected before.
+            // On first launch the socket may not connect at all — HTTP polling
+            // covers this silently, no need to alarm the user.
+            if (_hasEverConnected) {
+              _showStatusBanner('Waiting for connection...', Colors.orange);
+            }
           } else {
-            _showStatusBanner('Reconnected!', const Color(0xFF10B981));
+            if (_hasEverConnected) {
+              _showStatusBanner('Reconnected!', const Color(0xFF10B981));
+            }
+            _hasEverConnected = true;
             _socket.trackTrip(widget.tripId);
             _pollStatus();
             Future.delayed(const Duration(milliseconds: 800), _pollStatus);
@@ -167,13 +193,11 @@ class _TrackingScreenState extends State<TrackingScreen>
       if (!mounted) return;
       final lat = double.tryParse(data['lat']?.toString() ?? '');
       final lng = double.tryParse(data['lng']?.toString() ?? '');
+      final heading = double.tryParse(data['heading']?.toString() ?? '');
       if (lat != null && lng != null) {
         _checkArrivingStatus(lat, lng);
-        setState(() {
-          _driverLatLng = LatLng(lat, lng);
-          _updateMapMarkers();
-          _fetchRouteForStatus(); // Keep route updated as driver moves
-        });
+        final newPos = LatLng(lat, lng);
+        _animateDriverTo(newPos, heading);
       }
     }));
 
@@ -514,7 +538,8 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Future<BitmapDescriptor> _getMarkerIcon(String type,
       {bool isSearching = false}) async {
-    final key = "${type}_$isSearching";
+    final pr = _devicePixelRatio.round();
+    final key = "${type}_${isSearching}_$pr";
     if (_markerIconCache.containsKey(key)) return _markerIconCache[key]!;
     final icon = await _drawMarkerIcon(type, isSearching: isSearching);
     _markerIconCache[key] = icon;
@@ -523,69 +548,216 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Future<BitmapDescriptor> _drawMarkerIcon(String type,
       {bool isSearching = false}) async {
-    const double size = 110.0;
+    final double pr = _devicePixelRatio;
+    // 68dp logical size → physical pixels for this screen
+    const double logDp = 68.0;
+    final double sz = logDp * pr;
+    final double r = sz * 0.46; // circle radius
+    final Offset center = Offset(sz / 2, sz / 2);
+
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, size, size));
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, sz, sz));
 
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.18)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
+    // 1. Oval drop-shadow beneath the marker
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(sz / 2, sz * 0.90),
+        width: sz * 0.52,
+        height: sz * 0.11,
+      ),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.28)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, sz * 0.07),
+    );
+
+    // 2. Outer glow ring (Jago gold or blue for searching)
     canvas.drawCircle(
-        const Offset(size / 2, size / 2 + 3), size / 2 - 10, shadowPaint);
+      center,
+      r + sz * 0.04,
+      Paint()
+        ..color = (isSearching
+                ? const Color(0xFF4A90E2)
+                : const Color(0xFFC29763))
+            .withValues(alpha: 0.30)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, sz * 0.05),
+    );
 
+    // 3. Background circle — golden gradient for active, blue for searching
     final bgPaint = Paint()
-      ..color = isSearching ? const Color(0xFF2F7BFF) : const Color(0xFF1E40AF);
-    canvas.drawCircle(const Offset(size / 2, size / 2), size / 2 - 12, bgPaint);
+      ..shader = RadialGradient(
+        center: const Alignment(-0.3, -0.4),
+        radius: 1.0,
+        colors: isSearching
+            ? [const Color(0xFF5BA3F5), const Color(0xFF1A6DC4)]
+            : [const Color(0xFFE8C882), const Color(0xFFA87A2A)],
+      ).createShader(Rect.fromCircle(center: center, radius: r));
+    canvas.drawCircle(center, r, bgPaint);
 
-    final borderPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
+    // 4. White border ring
     canvas.drawCircle(
-        const Offset(size / 2, size / 2), size / 2 - 12, borderPaint);
+      center,
+      r,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.90)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = sz * 0.045,
+    );
 
-    final t = type.toLowerCase();
-    final emoji = t.contains('auto') ? '🛺'
-        : t.contains('bike') || t.contains('moto') || t.contains('scooter') ? '🏍️'
-        : t.contains('parcel') ? '📦'
-        : t.contains('cargo') || t.contains('truck') || t.contains('tempo') ? '🚚'
-        : t.contains('intercity') || t.contains('outstation') ? '🚘'
-        : '🚗';
-    final tp = TextPainter(
-        text: TextSpan(text: emoji, style: const TextStyle(fontSize: 48)),
-        textDirection: TextDirection.ltr)
-      ..layout();
-    tp.paint(canvas, Offset((size - tp.width) / 2, (size - tp.height) / 2));
+    // 5. Vehicle 3D PNG inside the circle
+    final pngPath = VehicleArtwork.local3DPngPathFor(type);
+    bool pngLoaded = false;
+    if (pngPath != null) {
+      try {
+        final byteData = await rootBundle.load(pngPath);
+        final vSz = (sz * 0.66).toInt();
+        final codec = await ui.instantiateImageCodec(
+          byteData.buffer.asUint8List(),
+          targetWidth: vSz,
+          targetHeight: vSz,
+        );
+        final frame = await codec.getNextFrame();
+        canvas.drawImage(
+          frame.image,
+          Offset(sz * 0.17, sz * 0.14),
+          Paint(),
+        );
+        pngLoaded = true;
+      } catch (_) {}
+    }
 
-    final img =
-        await recorder.endRecording().toImage(size.toInt(), size.toInt());
+    // Emoji fallback if PNG unavailable
+    if (!pngLoaded) {
+      final t = type.toLowerCase();
+      final emoji = t.contains('auto')
+          ? '🛺'
+          : t.contains('bike') || t.contains('moto')
+              ? '🏍️'
+              : t.contains('tempo') || t.contains('truck') || t.contains('cargo')
+                  ? '🚚'
+                  : t.contains('parcel')
+                      ? '📦'
+                      : t.contains('outstation') || t.contains('intercity')
+                          ? '🚘'
+                          : '🚗';
+      final tp = TextPainter(
+        text: TextSpan(
+            text: emoji, style: TextStyle(fontSize: sz * 0.40)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(
+        canvas,
+        Offset((sz - tp.width) / 2, (sz - tp.height) / 2 - sz * 0.02),
+      );
+    }
+
+    // 6. Direction arrow at top — points forward (bearing = 0 = north)
+    //    Rotating the marker via Marker.rotation rotates this arrow too.
+    if (!isSearching) {
+      final ax = sz / 2;
+      final ay = sz * 0.03;
+      final arrowPaint = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill;
+      final arrow = Path()
+        ..moveTo(ax, ay)
+        ..lineTo(ax - sz * 0.065, ay + sz * 0.09)
+        ..lineTo(ax + sz * 0.065, ay + sz * 0.09)
+        ..close();
+      // Arrow shadow
+      canvas.drawPath(
+        arrow,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.25)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, sz * 0.02),
+      );
+      canvas.drawPath(arrow, arrowPaint);
+    }
+
+    final img = await recorder.endRecording().toImage(sz.toInt(), sz.toInt());
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+    return BitmapDescriptor.bytes(
+      data!.buffer.asUint8List(),
+      imagePixelRatio: pr,
+    );
   }
 
   Future<BitmapDescriptor> _pickupMarkerIcon() async {
-    const double size = 100.0;
+    final double pr = _devicePixelRatio;
+    const double logDp = 56.0;
+    final double sz = logDp * pr;
+    final Offset center = Offset(sz / 2, sz / 2);
+    final double r = sz * 0.38;
+
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, size, size));
-    final paint = Paint()..color = const Color(0xFF2F7BFF);
-    canvas.drawCircle(const Offset(size / 2, size / 2), size / 2 - 10,
-        paint..style = PaintingStyle.fill);
-    canvas.drawCircle(
-        const Offset(size / 2, size / 2),
-        size / 2 - 10,
-        Paint()
-          ..color = Colors.white
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4);
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, sz, sz));
+
+    // Shadow
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(sz / 2, sz * 0.90), width: sz * 0.48, height: sz * 0.10),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.22)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, sz * 0.06),
+    );
+    // Blue circle
+    canvas.drawCircle(center, r,
+      Paint()..shader = RadialGradient(
+        center: const Alignment(-0.3, -0.4),
+        radius: 1.0,
+        colors: const [Color(0xFF5BA3F5), Color(0xFF1565C0)],
+      ).createShader(Rect.fromCircle(center: center, radius: r)));
+    // White border
+    canvas.drawCircle(center, r,
+      Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = sz * 0.045);
+    // Pin emoji
     final tp = TextPainter(
-        text: const TextSpan(text: '🔍', style: TextStyle(fontSize: 40)),
-        textDirection: TextDirection.ltr)
-      ..layout();
-    tp.paint(canvas, Offset((size - tp.width) / 2, (size - tp.height) / 2));
-    final img =
-        await recorder.endRecording().toImage(size.toInt(), size.toInt());
+      text: TextSpan(text: '📍', style: TextStyle(fontSize: sz * 0.38)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset((sz - tp.width) / 2, (sz - tp.height) / 2 - sz * 0.02));
+
+    final img = await recorder.endRecording().toImage(sz.toInt(), sz.toInt());
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List(), imagePixelRatio: pr);
+  }
+
+  Future<BitmapDescriptor> _destinationMarkerIcon() async {
+    final double pr = _devicePixelRatio;
+    const double logDp = 52.0;
+    final double sz = logDp * pr;
+    final Offset center = Offset(sz / 2, sz * 0.38);
+    final double r = sz * 0.33;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, sz, sz));
+
+    // Green circle with flag emoji
+    canvas.drawCircle(center, r,
+      Paint()..shader = RadialGradient(
+        center: const Alignment(-0.3, -0.4),
+        radius: 1.0,
+        colors: const [Color(0xFF34D399), Color(0xFF059669)],
+      ).createShader(Rect.fromCircle(center: center, radius: r)));
+    canvas.drawCircle(center, r,
+      Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = sz * 0.04);
+
+    // Pin stem
+    final stemPath = Path()
+      ..moveTo(sz / 2 - sz * 0.04, center.dy + r - sz * 0.02)
+      ..lineTo(sz / 2, sz * 0.95)
+      ..lineTo(sz / 2 + sz * 0.04, center.dy + r - sz * 0.02)
+      ..close();
+    canvas.drawPath(stemPath, Paint()..color = const Color(0xFF059669));
+
+    // Flag emoji in circle
+    final tp = TextPainter(
+      text: TextSpan(text: '🏁', style: TextStyle(fontSize: sz * 0.34)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset((sz - tp.width) / 2, center.dy - tp.height / 2 - sz * 0.01));
+
+    final img = await recorder.endRecording().toImage(sz.toInt(), sz.toInt());
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List(), imagePixelRatio: pr);
   }
 
   void _handleStatusTransition(String newStatus) {
@@ -659,13 +831,27 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Future<void> _fetchRouteForStatus() async {
-    if (_driverLatLng == null || _trip == null) return;
+    if (_trip == null) return;
 
-    // Status rank: search=0, assigned/accepted=1/2, arrived=3, on_the_way=4
     final isGoingToPickup = _status == 'accepted' ||
         _status == 'driver_assigned' ||
         _status == 'arrived';
     final isGoingToDrop = _status == 'in_progress' || _status == 'on_the_way';
+    final isSearching = _status == 'searching';
+
+    // For parcel in searching state: draw pickup → destination route
+    if (_mode == 'parcel' && isSearching && _driverLatLng == null) {
+      final pLat = double.tryParse(_trip?['pickupLat']?.toString() ?? '') ?? 0.0;
+      final pLng = double.tryParse(_trip?['pickupLng']?.toString() ?? '') ?? 0.0;
+      final dstLat = double.tryParse(_trip?['destinationLat']?.toString() ?? '') ?? 0.0;
+      final dstLng = double.tryParse(_trip?['destinationLng']?.toString() ?? '') ?? 0.0;
+      if (pLat != 0 && dstLat != 0) {
+        await _fetchRoute(pLat, pLng, dstLat, dstLng);
+      }
+      return;
+    }
+
+    if (_driverLatLng == null) return;
 
     if (!isGoingToPickup && !isGoingToDrop) {
       if (_polylines.isNotEmpty) setState(() => _polylines.clear());
@@ -677,15 +863,12 @@ class _TrackingScreenState extends State<TrackingScreen>
       destLat = double.tryParse(_trip?['pickupLat']?.toString() ?? '') ?? 0.0;
       destLng = double.tryParse(_trip?['pickupLng']?.toString() ?? '') ?? 0.0;
     } else {
-      destLat =
-          double.tryParse(_trip?['destinationLat']?.toString() ?? '') ?? 0.0;
-      destLng =
-          double.tryParse(_trip?['destinationLng']?.toString() ?? '') ?? 0.0;
+      destLat = double.tryParse(_trip?['destinationLat']?.toString() ?? '') ?? 0.0;
+      destLng = double.tryParse(_trip?['destinationLng']?.toString() ?? '') ?? 0.0;
     }
 
     if (destLat == 0 || destLng == 0) return;
 
-    // Fetch route from driver to target
     await _fetchRoute(
         _driverLatLng!.latitude, _driverLatLng!.longitude, destLat, destLng);
   }
@@ -712,6 +895,9 @@ class _TrackingScreenState extends State<TrackingScreen>
         final overviewPolyline = data['overviewPolyline']?.toString();
         if (overviewPolyline != null && mounted) {
           final pts = _decodePolyline(overviewPolyline);
+          // Extract ETA for live countdown display
+          final etaSecs = (data['durationSeconds'] as num?)?.toInt() ??
+              (data['duration_seconds'] as num?)?.toInt();
           setState(() {
             _polylines.clear();
             _polylines.add(Polyline(
@@ -723,9 +909,10 @@ class _TrackingScreenState extends State<TrackingScreen>
               startCap: Cap.roundCap,
               endCap: Cap.roundCap,
             ));
+            if (etaSecs != null) {
+              _etaMinutes = (etaSecs / 60).ceil();
+            }
           });
-
-          // Fit markers and route in view if significant movement occurred
           _fitMarkersToScreen();
         }
       }
@@ -777,56 +964,71 @@ class _TrackingScreenState extends State<TrackingScreen>
       ));
       if (_status == 'searching') {
         _center = LatLng(pLat, pLng);
+        _mapController.moveZoom(LatLng(pLat, pLng), 15);
       }
     }
 
-    // 2. Assigned Driver Marker
+    // 2. Assigned Driver Marker — with bearing rotation (Porter/Rapido style)
     if (_driverLatLng != null &&
         _status != 'searching' &&
         _status != 'cancelled') {
       final vName = (_trip?['vehicleName'] ?? 'Pilot').toString();
+      final icon = await _getMarkerIcon(vName);
       newMarkers.add(Marker(
         markerId: const MarkerId('driver'),
         position: _driverLatLng!,
-        icon: await _getMarkerIcon(vName),
+        icon: icon,
         anchor: const Offset(0.5, 0.5),
+        rotation: _driverBearing,
+        flat: true,
       ));
-      if (_status != 'completed') {
-        _mapController.moveZoom(_driverLatLng!, 16);
+      // Smooth camera animate instead of hard jump
+      if (_status != 'completed' && !_userPanned) {
+        _mapController.animateTo(_driverLatLng!);
       }
     }
 
-    // 3. Destination Marker (visible during and after trip)
+    // 3. Destination Marker
     final dLat = double.tryParse(_trip?['destinationLat']?.toString() ??
         _trip?['destination_lat']?.toString() ??
         '');
     final dLng = double.tryParse(_trip?['destinationLng']?.toString() ??
         _trip?['destination_lng']?.toString() ??
         '');
-    if (dLat != null &&
-        dLng != null &&
-        dLat != 0 &&
-        (_status == 'in_progress' ||
+    // For parcel: always show destination marker so user sees pickup→drop from start
+    // For ride: only show once trip is in progress or completed
+    final showDestination = dLat != null && dLng != null && dLat != 0 &&
+        (_mode == 'parcel' ||
+            _status == 'in_progress' ||
             _status == 'on_the_way' ||
-            _status == 'completed')) {
+            _status == 'completed');
+    if (showDestination) {
       newMarkers.add(Marker(
         markerId: const MarkerId('destination'),
-        position: LatLng(dLat, dLng),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        position: LatLng(dLat!, dLng!),
+        icon: await _destinationMarkerIcon(),
+        anchor: const Offset(0.5, 1.0),
       ));
 
       if (_driverLatLng != null) {
         final bounds = LatLngBounds(
           southwest: LatLng(
-            _driverLatLng!.latitude < dLat ? _driverLatLng!.latitude : dLat,
-            _driverLatLng!.longitude < dLng ? _driverLatLng!.longitude : dLng,
+            math.min(_driverLatLng!.latitude, dLat),
+            math.min(_driverLatLng!.longitude, dLng),
           ),
           northeast: LatLng(
-            _driverLatLng!.latitude > dLat ? _driverLatLng!.latitude : dLat,
-            _driverLatLng!.longitude > dLng ? _driverLatLng!.longitude : dLng,
+            math.max(_driverLatLng!.latitude, dLat),
+            math.max(_driverLatLng!.longitude, dLng),
           ),
         );
         _mapController.fitBounds(bounds, padding: 100);
+      } else if (pLat != null && pLng != null) {
+        // No driver yet — fit pickup + destination on screen
+        final bounds = LatLngBounds(
+          southwest: LatLng(math.min(pLat, dLat), math.min(pLng, dLng)),
+          northeast: LatLng(math.max(pLat, dLat), math.max(pLng, dLng)),
+        );
+        _mapController.fitBounds(bounds, padding: 80);
       }
     }
 
@@ -890,6 +1092,116 @@ class _TrackingScreenState extends State<TrackingScreen>
     return 12742 * math.asin(math.sqrt(a));
   }
 
+  // ── Bearing between two points (degrees, 0=North) ────────────────────────────
+  double _bearingBetween(LatLng from, LatLng to) {
+    final lat1 = from.latitude * math.pi / 180;
+    final lat2 = to.latitude * math.pi / 180;
+    final dLng = (to.longitude - from.longitude) * math.pi / 180;
+    final y = math.sin(dLng) * math.cos(lat2);
+    final x = math.cos(lat1) * math.sin(lat2) -
+        math.sin(lat1) * math.cos(lat2) * math.cos(dLng);
+    return (math.atan2(y, x) * 180 / math.pi + 360) % 360;
+  }
+
+  // ── Smooth driver marker animation (Porter/Rapido style) ─────────────────────
+  // Interpolates driver position from old to new over 800ms at ~60fps.
+  void _animateDriverTo(LatLng target, double? heading) {
+    if (!mounted) return;
+    final from = _driverLatLng ?? target;
+
+    // Compute bearing from movement direction when no heading from server
+    if (_driverLatLng != null) {
+      final dist = _calculateDistance(
+          from.latitude, from.longitude, target.latitude, target.longitude);
+      if (dist > 0.001) {
+        // >1m movement → compute bearing
+        _driverBearing = heading ?? _bearingBetween(from, target);
+      }
+    } else {
+      _driverBearing = heading ?? _driverBearing;
+    }
+    _prevDriverLatLng = from;
+    _markerAnimFrom = from;
+    _markerAnimTo = target;
+    _markerAnimProgress = 0.0;
+
+    _markerAnimTimer?.cancel();
+    const totalMs = 800;
+    const tickMs = 16; // ~60fps
+    int elapsed = 0;
+
+    _markerAnimTimer = Timer.periodic(const Duration(milliseconds: tickMs), (t) {
+      if (!mounted) { t.cancel(); return; }
+      elapsed += tickMs;
+      _markerAnimProgress = (elapsed / totalMs).clamp(0.0, 1.0);
+
+      // Ease-out cubic: feels natural like real movement
+      final ease = 1 - math.pow(1 - _markerAnimProgress, 3).toDouble();
+
+      final animLat = _markerAnimFrom!.latitude +
+          (target.latitude - _markerAnimFrom!.latitude) * ease;
+      final animLng = _markerAnimFrom!.longitude +
+          (target.longitude - _markerAnimFrom!.longitude) * ease;
+      final animPos = LatLng(animLat, animLng);
+
+      _driverLatLng = animPos;
+      _updateDriverMarkerOnly(animPos);
+
+      // Smooth camera follow — only if user hasn't panned manually
+      if (!_userPanned && _status != 'completed') {
+        _mapController.animateTo(animPos);
+      }
+
+      if (_markerAnimProgress >= 1.0) {
+        t.cancel();
+        _driverLatLng = target;
+        // Smart route refresh: only when driver moved >80m from last fetch
+        _maybeRefreshRoute(target);
+      }
+    });
+  }
+
+  // Updates only the driver marker without rebuilding all markers (perf)
+  void _updateDriverMarkerOnly(LatLng pos) {
+    if (!mounted) return;
+    setState(() {
+      _markers.removeWhere((m) => m.markerId.value == 'driver');
+      final vName = (_trip?['vehicleName'] ?? 'Pilot').toString();
+      final pr = _devicePixelRatio.round();
+      final cacheKey = '${vName}_false_$pr';
+      final cached = _markerIconCache[cacheKey];
+      if (cached != null) {
+        _markers.add(Marker(
+          markerId: const MarkerId('driver'),
+          position: pos,
+          icon: cached,
+          anchor: const Offset(0.5, 0.5),
+          rotation: _driverBearing,
+          flat: true,
+        ));
+      }
+    });
+  }
+
+  // Smart route refresh: only if moved >80m since last fetch
+  void _maybeRefreshRoute(LatLng current) {
+    if (_lastRouteFetchLatLng == null) {
+      _lastRouteFetchLatLng = current;
+      _fetchRouteForStatus();
+      return;
+    }
+    final dist = _calculateDistance(
+      _lastRouteFetchLatLng!.latitude,
+      _lastRouteFetchLatLng!.longitude,
+      current.latitude,
+      current.longitude,
+    );
+    if (dist >= _routeRefreshThresholdKm) {
+      _lastRouteFetchLatLng = current;
+      _fetchRouteForStatus();
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -900,11 +1212,12 @@ class _TrackingScreenState extends State<TrackingScreen>
     _searchTimeoutTimer?.cancel();
     _nearbyDriversTimer?.cancel();
     _bannerTimer?.cancel();
+    _markerAnimTimer?.cancel();
+    _cameraCooldownTimer?.cancel();
     _stopDispatchRecovery();
     _pulseCtrl.dispose();
     _tts.stop();
     _mapController.dispose();
-    // Don't disconnect socket — it's a shared singleton
     super.dispose();
   }
 
@@ -1280,8 +1593,8 @@ class _TrackingScreenState extends State<TrackingScreen>
     _pollTimer?.cancel();
     if (_status == 'completed' || _status == 'cancelled') return;
     final interval = _status == 'in_progress' || _status == 'on_the_way'
-        ? const Duration(seconds: 10)
-        : const Duration(seconds: 5);
+        ? const Duration(seconds: 5)
+        : const Duration(seconds: 3);
     _pollTimer = Timer.periodic(interval, (_) => _pollStatus());
   }
 
@@ -1360,18 +1673,32 @@ class _TrackingScreenState extends State<TrackingScreen>
           final rawStatus = order['currentStatus']?.toString() ??
               order['current_status']?.toString() ??
               'searching';
+          // Extract destination lat/lng from first drop location
+          final drops = order['drops'] as List<dynamic>? ?? [];
+          final firstDrop = drops.isNotEmpty && drops[0] is Map
+              ? Map<String, dynamic>.from(drops[0] as Map)
+              : <String, dynamic>{};
+          final destLat = firstDrop['lat'] ?? firstDrop['destinationLat'] ?? firstDrop['destination_lat'];
+          final destLng = firstDrop['lng'] ?? firstDrop['destinationLng'] ?? firstDrop['destination_lng'];
           trip = {
             ...order,
             'id': order['id']?.toString(),
             'currentStatus': rawStatus,
             'tripType': 'parcel',
             'pickupAddress': order['pickupAddress'] ?? order['pickup_address'],
-            'destinationAddress': order['dropAddress'] ?? order['drop_address'],
+            'pickupLat': order['pickupLat'] ?? order['pickup_lat'],
+            'pickupLng': order['pickupLng'] ?? order['pickup_lng'],
+            'destinationAddress': firstDrop['address'] ?? firstDrop['drop_address'] ?? order['dropAddress'] ?? order['drop_address'],
+            'destinationLat': destLat,
+            'destinationLng': destLng,
             'driverName': order['driverName'] ?? order['driver_name'],
             'driverPhone': order['driverPhone'] ?? order['driver_phone'],
             'driverLat': order['driverLat'] ?? order['driver_lat'],
             'driverLng': order['driverLng'] ?? order['driver_lng'],
             'estimatedFare': order['totalFare'] ?? order['total_fare'],
+            // vehicleName for marker icon lookup — use vehicleCategory from parcel order
+            'vehicleName': order['vehicleName'] ?? order['vehicle_name'] ??
+                order['vehicleCategory'] ?? order['vehicle_category'] ?? 'parcel_bike',
           };
         }
         if (trip != null) {
@@ -1461,8 +1788,9 @@ class _TrackingScreenState extends State<TrackingScreen>
           final dLng = double.tryParse(tripData['driverLng']?.toString() ?? '');
           if (dLat != null && dLng != null && dLat != 0) {
             _driverLatLng = LatLng(dLat, dLng);
-            _updateMapMarkers();
           }
+          _updateMapMarkers();
+          _fetchRouteForStatus();
 
           if (_status == 'completed' || _status == 'cancelled') {
             _pollTimer?.cancel();
@@ -1479,9 +1807,6 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Future<void> _cancelTrip(String reason) async {
-    if (_isRideMode) {
-      _socket.cancelTrip(_trip?['id']?.toString() ?? widget.tripId);
-    }
     double? walletRefund;
     try {
       final headers = await AuthService.getHeaders();
@@ -1595,6 +1920,7 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   @override
   Widget build(BuildContext context) {
+    _devicePixelRatio = MediaQuery.of(context).devicePixelRatio.clamp(1.0, 4.0);
     final statusInfo = _getStatusInfo(_status);
     final trip = _trip;
     final otp =
@@ -1672,10 +1998,19 @@ class _TrackingScreenState extends State<TrackingScreen>
                       controller: _mapController,
                       initialCameraPosition: CameraPosition(target: _center, zoom: 15),
                       onMapCreated: (_) {
-                        if (_driverLatLng != null) {
-                          _updateMapMarkers();
-                          _fetchRouteForStatus();
-                        }
+                        _updateMapMarkers();
+                        _fetchRouteForStatus();
+                      },
+                      // Detect manual pan: pause auto-follow for 6s then resume
+                      onCameraMove: (_) {
+                        if (!_userPanned) setState(() => _userPanned = true);
+                        _cameraCooldownTimer?.cancel();
+                      },
+                      onCameraIdle: () {
+                        _cameraCooldownTimer?.cancel();
+                        _cameraCooldownTimer = Timer(const Duration(seconds: 6), () {
+                          if (mounted) setState(() => _userPanned = false);
+                        });
                       },
                       markers: _markers,
                       polylines: _polylines,
@@ -1696,6 +2031,56 @@ class _TrackingScreenState extends State<TrackingScreen>
                       },
                     ),
                     ),
+                    // Re-center button (Porter/Rapido style) — appears when user pans away
+                    if (_userPanned && _driverLatLng != null)
+                      Positioned(
+                        top: 16,
+                        right: 16,
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() => _userPanned = false);
+                            _cameraCooldownTimer?.cancel();
+                            if (_driverLatLng != null) {
+                              _mapController.animateTo(_driverLatLng!);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 8, offset: Offset(0, 2))],
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                              Icon(Icons.my_location_rounded, color: Color(0xFF2563EB), size: 18),
+                              SizedBox(width: 6),
+                              Text('Follow Pilot', style: TextStyle(color: Color(0xFF2563EB), fontSize: 12, fontWeight: FontWeight.w600)),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    // ETA chip (shows when route is calculated)
+                    if (_etaMinutes != null && _driverLatLng != null && _status != 'searching' && _status != 'completed')
+                      Positioned(
+                        top: 16,
+                        left: 16,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2563EB),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 2))],
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            const Icon(Icons.access_time_rounded, color: Colors.white, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              _etaMinutes! <= 1 ? 'Arriving now' : '$_etaMinutes min away',
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                            ),
+                          ]),
+                        ),
+                      ),
                     Positioned(
                       bottom: 0,
                       left: 0,
@@ -1814,7 +2199,20 @@ class _TrackingScreenState extends State<TrackingScreen>
     );
   }
 
-  void _startInAppCall(String driverName) {
+  Future<void> _startInAppCall(String driverName) async {
+    // Primary: real phone call via native dialer — instant, works on all networks
+    final phone = _trip?['driverPhone']?.toString() ??
+        _trip?['driver_phone']?.toString();
+    if (phone != null && phone.trim().isNotEmpty) {
+      final clean = phone.trim().replaceAll(RegExp(r'[^\d+]'), '');
+      final uri = Uri.parse('tel:$clean');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+        return;
+      }
+    }
+    // Fallback: socket call screen
+    if (!mounted) return;
     final driverId =
         _trip?['driverId']?.toString() ?? _trip?['driver_id']?.toString();
     if (driverId != null && driverId.isNotEmpty) {
@@ -1825,9 +2223,9 @@ class _TrackingScreenState extends State<TrackingScreen>
           targetUserId: driverId,
         ),
       ));
-    } else if ((_trip?['driverPhone'] ?? _trip?['driver_phone']) != null) {
-      launchUrl(
-          Uri.parse('tel:${_trip!['driverPhone'] ?? _trip!['driver_phone']}'));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Driver phone number not available')));
     }
   }
 
@@ -2208,14 +2606,56 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Widget _buildSearchingView(Map<String, dynamic>? trip, dynamic actualFare, dynamic estimatedFare) {
-    final fareVal = actualFare ?? estimatedFare ?? '--';
-    final dist = trip?['estimatedDistance'] ?? trip?['estimated_distance'] ?? '--';
+    final rawFare = actualFare ?? estimatedFare;
+    final fareVal = rawFare != null && (rawFare is num) && rawFare > 0
+        ? rawFare.toDouble().toStringAsFixed(0)
+        : (rawFare != null && rawFare.toString() != '0' && rawFare.toString() != '0.0' ? rawFare : '--');
+    final rawDist = trip?['estimatedDistance'] ?? trip?['estimated_distance'];
+    final dist = rawDist != null
+        ? (rawDist is num ? rawDist.toDouble().toStringAsFixed(1) : rawDist.toString())
+        : '--';
     final duration = trip?['estimatedDurationMinutes'] ?? trip?['estimated_duration'] ?? trip?['etaMinutes'] ?? '--';
     final eta = trip?['etaMinutes']?.toString() ?? '2';
+    final vehicleName = trip?['vehicleName']?.toString() ?? trip?['vehicle_name']?.toString() ?? '';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Vehicle card (Rapido-style) ───────────────────────────────────────
+        if (vehicleName.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0F7FF),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF2C95F1).withValues(alpha: 0.2)),
+            ),
+            child: Row(children: [
+              AnimatedBuilder(
+                animation: _pulseCtrl,
+                builder: (_, child) => Transform.scale(
+                  scale: 1.0 + _pulseCtrl.value * 0.08,
+                  child: child,
+                ),
+                child: VehicleArtwork(vehicleKey: vehicleName, width: 52, height: 52),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(vehicleName,
+                      style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: const Color(0xFF0F172A))),
+                  Text('Searching nearby pilots…',
+                      style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF64748B))),
+                ]),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 18, height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: const Color(0xFF2C95F1)),
+              ),
+            ]),
+          ),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2478,8 +2918,14 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   Widget _buildFareRow(
       Map<String, dynamic> trip, dynamic actualFare, dynamic estimatedFare) {
-    final fareVal = actualFare ?? estimatedFare;
-    final dist = trip['estimatedDistance'] ?? trip['estimated_distance'];
+    final rawFare = actualFare ?? estimatedFare;
+    final fareVal = rawFare != null && (rawFare is num) && rawFare > 0
+        ? rawFare.toDouble().toStringAsFixed(0)
+        : (rawFare != null && rawFare.toString() != '0' && rawFare.toString() != '0.0' ? rawFare : null);
+    final rawDist = trip['estimatedDistance'] ?? trip['estimated_distance'];
+    final dist = rawDist != null
+        ? (rawDist is num ? rawDist.toDouble().toStringAsFixed(1) : rawDist.toString())
+        : null;
     final vehicle = trip['vehicleName'] ?? trip['vehicle_name'];
     return Wrap(spacing: 8, children: [
       if (fareVal != null)
@@ -2688,7 +3134,10 @@ class _TrackingScreenState extends State<TrackingScreen>
     final dest = trip['destinationShortName'] ??
         trip['destinationAddress'] ??
         'Destination';
-    final dist = trip['estimatedDistance'] ?? trip['estimated_distance'];
+    final rawDist = trip['estimatedDistance'] ?? trip['estimated_distance'];
+    final dist = rawDist != null
+        ? (rawDist is num ? rawDist.toDouble().toStringAsFixed(1) : rawDist.toString())
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(16),

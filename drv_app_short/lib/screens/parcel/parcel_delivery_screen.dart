@@ -64,6 +64,8 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
       _drops = [];
     }
     _dropIdx = (_order['current_drop_index'] as int?) ?? 0;
+    final savedEarnings = double.tryParse(_order['driver_earnings']?.toString() ?? '');
+    if (savedEarnings != null && savedEarnings > 0) _driverEarnings = savedEarnings;
 
     // Restore stage if order was already in transit (driver resumed app)
     final status = _order['current_status']?.toString() ?? 'driver_assigned';
@@ -285,7 +287,7 @@ class _ParcelDeliveryScreenState extends State<ParcelDeliveryScreen>
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                '₹${_order['total_fare'] ?? 0}',
+                '₹${_driverEarnings > 0 ? _driverEarnings.toStringAsFixed(0) : (_order['driver_earnings'] ?? _order['total_fare'] ?? 0)}',
                 style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w400, fontSize: 14),
               ),
             ),

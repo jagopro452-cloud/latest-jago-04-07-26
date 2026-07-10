@@ -337,6 +337,13 @@ class JagoMapController {
   void moveZoom(LatLng target, double zoom) {
     _inner?.move(ll.LatLng(target.latitude, target.longitude), zoom);
   }
+  void moveWithBearing(LatLng target, double zoom, double bearing) {
+    final m = _inner;
+    if (m == null) return;
+    m.move(ll.LatLng(target.latitude, target.longitude), zoom);
+    m.rotate(-bearing);
+  }
+  void resetBearing() => _inner?.rotate(0);
   void fitBounds(LatLngBounds bounds, {double padding = 48}) {
     _inner?.fitCamera(fmap.CameraFit.bounds(
       bounds: fmap.LatLngBounds(
@@ -404,6 +411,7 @@ class JagoMapView extends StatefulWidget {
   final void Function(JagoMapController controller)? onMapCreated;
   final void Function(CameraPosition position)? onCameraMove;
   final void Function()? onCameraIdle;
+  final void Function()? onUserPan; // called when user manually pans/zooms the map
   const JagoMapView({
     super.key,
     required this.initialCameraPosition,
@@ -416,6 +424,7 @@ class JagoMapView extends StatefulWidget {
     this.onMapCreated,
     this.onCameraMove,
     this.onCameraIdle,
+    this.onUserPan,
   });
   @override
   State<JagoMapView> createState() => _JagoMapViewState();
@@ -484,7 +493,8 @@ class _JagoMapViewState extends State<JagoMapView> {
           interactionOptions: const fmap.InteractionOptions(
             flags: fmap.InteractiveFlag.all,
           ),
-          onPositionChanged: (pos, _) {
+          onPositionChanged: (pos, hasGesture) {
+            if (hasGesture) widget.onUserPan?.call();
             widget.onCameraMove?.call(CameraPosition(
               target: LatLng(pos.center.latitude, pos.center.longitude),
               zoom: pos.zoom,

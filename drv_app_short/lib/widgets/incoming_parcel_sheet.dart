@@ -146,7 +146,9 @@ class _IncomingParcelSheetState extends State<IncomingParcelSheet>
   Widget build(BuildContext context) {
     final parcel = widget.parcel;
     final vehicleType = parcel['vehicleCategory']?.toString() ?? 'bike_parcel';
-    final fare = parcel['totalFare'] ?? 0;
+    final rawEarnings = parcel['driverEarnings'];
+    final rawTotalFare = parcel['totalFare'] ?? 0;
+    final fare = rawEarnings != null ? rawEarnings : rawTotalFare;
     final stops = parcel['dropCount'] ?? 1;
     final weight = parcel['weightKg']?.toString() ?? '';
     final pickup = parcel['pickupAddress']?.toString() ?? parcel['pickup_address']?.toString() ?? '';

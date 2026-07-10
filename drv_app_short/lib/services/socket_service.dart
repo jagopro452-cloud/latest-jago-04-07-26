@@ -40,6 +40,8 @@ class SocketService {
   final _callIceController = StreamController<Map<String, dynamic>>.broadcast();
   final _callEndedController = StreamController<Map<String, dynamic>>.broadcast();
   final _callRejectedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _parcelCancelledController = StreamController<Map<String, dynamic>>.broadcast();
+  final _destinationReachedController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Map<String, dynamic>> get onNewTrip => _newTripController.stream;
   Stream<Map<String, dynamic>> get onTripCancelled => _tripCancelledController.stream;
@@ -58,6 +60,8 @@ class SocketService {
   Stream<Map<String, dynamic>> get onCallIce => _callIceController.stream;
   Stream<Map<String, dynamic>> get onCallEnded => _callEndedController.stream;
   Stream<Map<String, dynamic>> get onCallRejected => _callRejectedController.stream;
+  Stream<Map<String, dynamic>> get onParcelCancelled => _parcelCancelledController.stream;
+  Stream<Map<String, dynamic>> get onDestinationReached => _destinationReachedController.stream;
   bool get isConnected => _isConnected;
 
   String _eventTripId(Map<String, dynamic> data) {
@@ -155,7 +159,8 @@ class SocketService {
       baseUrl,
       IO.OptionBuilder()
           .setTransports(['websocket', 'polling'])
-          .setQuery({'userId': userId, 'userType': 'driver'})
+          .setQuery({'userId': userId, 'userType': 'driver', 'token': token})
+          .setAuth({'token': token})
           .setExtraHeaders({'Authorization': 'Bearer $token'})
           .enableAutoConnect()
           .enableReconnection()
@@ -266,6 +271,20 @@ class SocketService {
     // Parcel delivery request
     _socket!.on('parcel:new_request', (data) {
       _newParcelController.add(Map<String, dynamic>.from(data));
+    });
+
+    // Parcel cancelled by customer
+    _socket!.on('parcel:cancelled', (data) {
+      final map = Map<String, dynamic>.from(data);
+      _activeTripId = null;
+      _parcelCancelledController.add(map);
+    });
+
+    // Server confirmed driver arrived at destination
+    _socket!.on('trip:destination_reached', (data) {
+      final map = Map<String, dynamic>.from(data);
+      if (!_matchesActiveTrip(map)) return;
+      _destinationReachedController.add(map);
     });
 
     // Wallet recharged (after Razorpay payment verified)

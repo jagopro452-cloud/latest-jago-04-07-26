@@ -174,7 +174,8 @@ class SocketService {
       baseUrl,
       IO.OptionBuilder()
           .setTransports(['websocket', 'polling'])
-          .setQuery({'userId': userId, 'userType': 'customer'})
+          .setQuery({'userId': userId, 'userType': 'customer', 'token': token})
+          .setAuth({'token': token})
           .setExtraHeaders({'Authorization': 'Bearer $token'})
           .enableAutoConnect()
           .enableReconnection()

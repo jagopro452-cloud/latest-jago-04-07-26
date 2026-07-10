@@ -12,15 +12,14 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../widgets/jago_map_markers.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../config/api_config.dart';
 import '../../config/jago_theme.dart';
 import '../../services/api_retry.dart';
 import '../../services/auth_service.dart';
 import '../../services/socket_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../services/call_service.dart';
 import '../../services/trip_service.dart';
-import '../../widgets/jago_map_markers.dart';
 import '../call/call_screen.dart';
 import '../chat/trip_chat_sheet.dart';
 import '../home/home_screen.dart';
@@ -78,14 +77,22 @@ class _TripScreenState extends State<TripScreen>
   StreamSubscription<Position>? _posStream;
   Position? _lastTripPosition;
   Timer? _tripTimer;
+  Timer? _routeRefreshTimer; // re-fetches route from current position every 45s
   Timer? _statePollTimer; // 5s poll — server is source of truth
   List<String> _cancelReasons = [];
   StreamSubscription? _cancelSub;
   StreamSubscription? _incomingCallSub;
   StreamSubscription? _tripStatusSub;
+  bool _autoArrivedTriggered = false; // prevent duplicate auto-arrive
+  String? _lastCompletionIdempotencyKey;
   bool _locationWarningShown = false;
   bool _hasLiveLocationAccess = false;
   String _lastVoiceCue = '';
+  // Rapido-style: camera always follows driver. Pauses 8s after user manually pans.
+  DateTime? _userPannedAt;
+  bool get _autoFollowActive =>
+      _userPannedAt == null ||
+      DateTime.now().difference(_userPannedAt!).inSeconds > 8;
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
 
@@ -183,7 +190,7 @@ class _TripScreenState extends State<TripScreen>
   void _startStatePoll() {
     _statePollTimer?.cancel();
     _statePollTimer =
-        Timer.periodic(const Duration(seconds: 5), (_) => _syncTripState());
+        Timer.periodic(const Duration(seconds: 3), (_) => _syncTripState());
   }
 
   void _stopStatePoll() {
@@ -259,11 +266,19 @@ class _TripScreenState extends State<TripScreen>
         _tripElapsedSec = DateTime.now().difference(_tripStartTime!).inSeconds;
       });
     });
+    // Refresh route from current driver position every 45s (shrinking polyline)
+    _routeRefreshTimer?.cancel();
+    _routeRefreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (!mounted) return;
+      _fetchRouteForCurrentStatus();
+    });
   }
 
   void _stopTripTimer() {
     _tripTimer?.cancel();
     _tripTimer = null;
+    _routeRefreshTimer?.cancel();
+    _routeRefreshTimer = null;
   }
 
   String _formatElapsed(int secs) {
@@ -383,12 +398,16 @@ class _TripScreenState extends State<TripScreen>
           incomingTripId != currentTripId) {
         return;
       }
-      if (_isTripLive) {
-        _syncTripState();
-        return;
-      }
       _locationTimer?.cancel();
       _stopTripTimer();
+      _stopStatePoll();
+      void goHome() {
+        if (!mounted) return;
+        Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+            (_) => false);
+      }
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -411,10 +430,7 @@ class _TripScreenState extends State<TripScreen>
                       borderRadius: BorderRadius.circular(10))),
               onPressed: () {
                 Navigator.pop(context);
-                Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const HomeScreen()),
-                    (_) => false);
+                goHome();
               },
               child: const Text('OK',
                   style: TextStyle(fontWeight: FontWeight.w500)),
@@ -462,6 +478,10 @@ class _TripScreenState extends State<TripScreen>
         _trip = _mergeTripState(_trip, data);
         _loading = false;
       });
+      // Reset auto-arrive gate when status moves past 'accepted'
+      if (incomingStatus == 'arrived' || incomingStatus == 'in_progress' || incomingStatus == 'on_the_way') {
+        _autoArrivedTriggered = true;
+      }
       if (_isTripLive) {
         _startTripTimer();
       }
@@ -819,6 +839,7 @@ class _TripScreenState extends State<TripScreen>
 
   Future<void> _fetchRoute(
       double fromLat, double fromLng, double toLat, double toLng) async {
+    // 1. Try server route API
     try {
       final headers = await AuthService.getHeaders();
       final res = await http
@@ -837,34 +858,69 @@ class _TripScreenState extends State<TripScreen>
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final overviewPolyline = data['overviewPolyline']?.toString();
         final distKm = (data['totalDistanceKm'] as num?)?.toDouble() ?? 0.0;
-        final durMin =
-            (data['totalDurationMinutes'] as num?)?.toDouble() ?? 0.0;
-        if (overviewPolyline != null && mounted) {
+        final durMin = (data['totalDurationMinutes'] as num?)?.toDouble() ?? 0.0;
+        if (overviewPolyline != null && overviewPolyline.isNotEmpty && mounted) {
           final pts = _decodePolyline(overviewPolyline);
-          setState(() {
-            _polylines.clear();
-            _polylines.add(Polyline(
-              polylineId: const PolylineId('route'),
-              points: pts,
-              color: JT.primary,
-              width: 5,
-              patterns: [],
-            ));
-            _distanceToTargetM = distKm * 1000;
-            _etaSec = (durMin * 60).round();
-          });
-        }
-      } else if (res.statusCode != 200) {
-        if (mounted) {
-          String msg = 'Could not load route';
-          try {
-            msg = (jsonDecode(res.body) as Map)['message']?.toString() ?? msg;
-          } catch (_) {}
-          _showSnack(msg, error: true);
+          if (pts.isNotEmpty) {
+            setState(() {
+              _polylines.clear();
+              _polylines.add(Polyline(
+                polylineId: const PolylineId('route'),
+                points: pts,
+                color: JT.primary,
+                width: 5,
+              ));
+              if (distKm > 0) _distanceToTargetM = distKm * 1000;
+              if (durMin > 0) _etaSec = (durMin * 60).round();
+            });
+            return;
+          }
         }
       }
-    } catch (e) {
-      if (mounted) _showSnack('Route unavailable. Check connection.', error: true);
+    } catch (_) {}
+
+    // 2. Silent fallback: OSRM public routing API
+    try {
+      final osrmUri = Uri.parse(
+          'https://router.project-osrm.org/route/v1/driving/$fromLng,$fromLat;$toLng,$toLat?overview=full&geometries=polyline');
+      final res = await http.get(osrmUri).timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final geometry = (data['routes'] as List?)?.firstOrNull?['geometry']?.toString();
+        final distM = ((data['routes'] as List?)?.firstOrNull?['distance'] as num?)?.toDouble() ?? 0.0;
+        final durS = ((data['routes'] as List?)?.firstOrNull?['duration'] as num?)?.toDouble() ?? 0.0;
+        if (geometry != null && geometry.isNotEmpty && mounted) {
+          final pts = _decodePolyline(geometry);
+          if (pts.isNotEmpty) {
+            setState(() {
+              _polylines.clear();
+              _polylines.add(Polyline(
+                polylineId: const PolylineId('route'),
+                points: pts,
+                color: JT.primary,
+                width: 5,
+              ));
+              if (distM > 0) _distanceToTargetM = distM;
+              if (durS > 0) _etaSec = durS.round();
+            });
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 3. Last resort: dashed straight line — never show error to driver
+    if (mounted) {
+      setState(() {
+        _polylines.clear();
+        _polylines.add(Polyline(
+          polylineId: const PolylineId('route'),
+          points: [LatLng(fromLat, fromLng), LatLng(toLat, toLng)],
+          color: JT.primary.withValues(alpha: 0.55),
+          width: 4,
+          patterns: [PatternItem.dash(18), PatternItem.gap(10)],
+        ));
+      });
     }
   }
 
@@ -936,7 +992,9 @@ class _TripScreenState extends State<TripScreen>
       _lastTripPosition = pos;
       if (!mounted) return;
       setState(() => _center = LatLng(pos.latitude, pos.longitude));
-      _mapController.move(_center);
+      if (_autoFollowActive) {
+        _mapController.moveWithBearing(_center, 17, pos.heading);
+      }
       _updateSelfMarker(
         pos.latitude,
         pos.longitude,
@@ -996,10 +1054,20 @@ class _TripScreenState extends State<TripScreen>
         _etaSec = etaS;
       });
     if (toPickup) {
-      final near = dm <= 100;
+      final near = dm <= 200;
       if (mounted && near != _nearPickup) {
         setState(() => _nearPickup = near);
-        if (near) _showSnack('You are near the pickup location!');
+        if (near) {
+          HapticFeedback.mediumImpact();
+          _showSnack('You are near the pickup location!');
+        }
+      }
+      // Geofence: auto-prompt "Mark Arrived" when within 50m
+      if (dm <= 50 && !_autoArrivedTriggered && mounted) {
+        _autoArrivedTriggered = true;
+        HapticFeedback.heavyImpact();
+        _speakCue('You have reached the pickup. Mark arrived.', dedupeKey: 'auto_arrive_prompt');
+        _showGeofenceArrivedPrompt();
       }
     } else {
       if (dm <= 300) {
@@ -1008,7 +1076,81 @@ class _TripScreenState extends State<TripScreen>
           dedupeKey: 'near_destination',
         );
       }
+      // Geofence: prompt driver to complete trip when within 100m of destination
+      if (dm <= 100 && (_status == 'in_progress' || _status == 'on_the_way') && mounted) {
+        _speakCue('You have arrived at the destination. Complete the trip.', dedupeKey: 'near_dest_complete');
+      }
     }
+  }
+
+  void _showGeofenceArrivedPrompt() {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isDismissible: true,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 44, height: 4,
+            decoration: BoxDecoration(color: JT.border, borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: JT.success.withValues(alpha: 0.10),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.location_on_rounded, color: JT.success, size: 40),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'You\'re at the Pickup!',
+            style: GoogleFonts.poppins(color: JT.textPrimary, fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Tap "I\'ve Arrived" to notify the customer and start the wait timer.',
+            style: GoogleFonts.poppins(color: JT.textSecondary, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 54,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: JT.success,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
+              ),
+              onPressed: () {
+                Navigator.pop(context);
+                _nextStep();
+              },
+              child: Text('I\'ve Arrived ✓', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700)),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Not yet', style: GoogleFonts.poppins(color: JT.textSecondary, fontSize: 13)),
+          ),
+        ]),
+      ),
+    ).then((_) {
+      // If driver dismissed without tapping arrived, allow re-trigger if they move away and return
+      if (_distanceToTargetM > 80) {
+        _autoArrivedTriggered = false;
+      }
+    });
   }
 
   // ── Cancel reasons ────────────────────────────────────────────────────────
@@ -1056,11 +1198,6 @@ class _TripScreenState extends State<TripScreen>
     try {
       if (_status == 'accepted' || _status == 'driver_assigned') {
         final pos = _lastTripPosition;
-        if (!_nearPickup) {
-          _showSnack('Move within 100m of pickup before marking arrived.', error: true);
-          setState(() => _loading = false);
-          return;
-        }
         final body = await TripService.markArrived(
           tripId,
           lat: pos?.latitude,
@@ -1113,6 +1250,16 @@ class _TripScreenState extends State<TripScreen>
           setState(() => _loading = false);
         }
       } else if (_status == 'in_progress' || _status == 'on_the_way') {
+        // For cash trips: show confirmation modal before completing
+        final pm = (_trip?['paymentMethod'] ?? _trip?['payment_method'] ?? 'cash').toString().toLowerCase();
+        if (pm == 'cash') {
+          final confirmed = await _showCashCollectionConfirmation();
+          if (!mounted) return;
+          if (!confirmed) {
+            setState(() => _loading = false);
+            return;
+          }
+        }
         await _completeTrip(h);
         return;
       }
@@ -1161,18 +1308,123 @@ class _TripScreenState extends State<TripScreen>
     }
   }
 
+  Future<bool> _showCashCollectionConfirmation() async {
+    final fare = double.tryParse(
+          (_trip?['estimatedFare'] ?? _trip?['estimated_fare'] ?? 0).toString()) ?? 0;
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isDismissible: false,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 44, height: 4,
+            decoration: BoxDecoration(color: JT.border, borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: JT.success.withValues(alpha: 0.10),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.payments_rounded, color: JT.success, size: 36),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Collect Cash First',
+            style: GoogleFonts.poppins(color: JT.textPrimary, fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            fare > 0
+                ? 'Please collect ₹${fare.toStringAsFixed(0)} cash from the customer before completing the trip.'
+                : 'Please collect the cash fare from the customer before completing the trip.',
+            style: GoogleFonts.poppins(color: JT.textSecondary, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          if (fare > 0)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: JT.success.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: JT.success.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                '₹${fare.toStringAsFixed(0)}',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  color: JT.success,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: JT.textSecondary,
+                  side: BorderSide(color: JT.border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('Cancel', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: JT.success,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  elevation: 0,
+                ),
+                onPressed: () => Navigator.pop(context, true),
+                child: Text('Cash Collected ✓', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15)),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+    return result == true;
+  }
+
   Future<void> _completeTrip(Map<String, String> authHeaders) async {
     final tripId = _trip?['id'] ?? _trip?['tripId'] ?? '';
     final estFare = _trip?['estimatedFare'] ?? _trip?['estimated_fare'] ?? 0.0;
     final estDist =
         _trip?['estimatedDistance'] ?? _trip?['estimated_distance'] ?? 0.0;
+    // Idempotency key: same trip within a 30s window → same key → server dedupes
+    final idempotencyKey = '${tripId}_complete_${DateTime.now().millisecondsSinceEpoch ~/ 30000}';
+    if (_lastCompletionIdempotencyKey == idempotencyKey) {
+      debugPrint('[TRIP] Duplicate complete attempt blocked by idempotency key');
+      return;
+    }
+    _lastCompletionIdempotencyKey = idempotencyKey;
     try {
       final res = await apiRetry(() => http.post(Uri.parse(ApiConfig.driverCompleteTrip),
           headers: {...authHeaders, 'Content-Type': 'application/json'},
           body: jsonEncode({
             'tripId': tripId,
             'actualFare': estFare,
-            'actualDistance': estDist
+            'actualDistance': estDist,
+            'idempotencyKey': idempotencyKey,
           })).timeout(const Duration(seconds: 10)));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -1955,12 +2207,30 @@ class _TripScreenState extends State<TripScreen>
 
   // ── Call / Navigation / SOS ───────────────────────────────────────────────
 
-  void _startInAppCall(String contactName) {
+  Future<void> _startInAppCall(String contactName) async {
+    // Primary: real phone call via native dialer — works on all networks
+    final phone = _trip?['customerPhone']?.toString() ??
+        _trip?['customer_phone']?.toString() ??
+        _trip?['passengerPhone']?.toString() ??
+        _trip?['passenger_phone']?.toString();
+    if (phone != null && phone.trim().isNotEmpty) {
+      final clean = phone.trim().replaceAll(RegExp(r'[^\d+]'), '');
+      final uri = Uri.parse('tel:$clean');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+        return;
+      }
+    }
+    // Fallback: socket call screen (signaling only, shows UI while on phone)
+    if (!mounted) return;
     final customerId =
         _trip?['customerId']?.toString() ?? _trip?['customer_id']?.toString();
     final tripId =
         _trip?['id']?.toString() ?? _trip?['tripId']?.toString() ?? '';
-    if (customerId == null || customerId.isEmpty) return;
+    if (customerId == null || customerId.isEmpty) {
+      _showSnack("Customer phone number not available", error: true);
+      return;
+    }
     Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => CallScreen(
             contactName: contactName,
@@ -1978,28 +2248,15 @@ class _TripScreenState extends State<TripScreen>
         builder: (_) => TripChatSheet(tripId: tripId, senderName: 'Driver'));
   }
 
-  Future<void> _openNavigation() async {
-    final tLat = _isHeadingToPickup
-        ? _resolveCoord(['pickupLat', 'pickup_lat'])
-        : _resolveCoord(['destinationLat', 'destination_lat']);
-    final tLng = _isHeadingToPickup
-        ? _resolveCoord(['pickupLng', 'pickup_lng'])
-        : _resolveCoord(['destinationLng', 'destination_lng']);
-    final label = _resolveTargetLabel();
-
-    if (tLat != 0 && tLng != 0) {
-      await _focusRouteOnMap(showReadySnack: true);
-      return;
-    }
-    final uri = tLat != 0 && tLng != 0
-        ? Uri.parse(
-            'https://www.google.com/maps/dir/?api=1&destination=$tLat,$tLng&travelmode=driving')
-        : Uri.parse(
-            'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(label)}');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+  // Re-centers camera on driver and resumes auto-follow (Rapido-style single tap).
+  void _reCenter() {
+    setState(() => _userPannedAt = null);
+    final pos = _lastTripPosition;
+    if (pos != null) {
+      _mapController.moveWithBearing(
+          LatLng(pos.latitude, pos.longitude), 17, pos.heading);
     } else {
-      _showSnack('Cannot open navigation', error: true);
+      _mapController.move(_center);
     }
   }
 
@@ -2109,6 +2366,10 @@ class _TripScreenState extends State<TripScreen>
               onMapCreated: (_) {
                 _mapController.move(_center);
                 _initMapMarkers();
+              },
+              onUserPan: () {
+                // User manually panned — pause auto-follow for 8 seconds
+                if (mounted) setState(() => _userPannedAt = DateTime.now());
               },
               markers: _markers,
               polylines: _polylines,
@@ -2301,12 +2562,13 @@ class _TripScreenState extends State<TripScreen>
   }
 
   void _centerDriverOnMap() {
+    setState(() => _userPannedAt = null); // resume auto-follow
     final pos = _lastTripPosition;
     if (pos == null) {
       _focusRouteOnMap(showReadySnack: true);
       return;
     }
-    _mapController.moveZoom(LatLng(pos.latitude, pos.longitude), 17);
+    _mapController.moveWithBearing(LatLng(pos.latitude, pos.longitude), 17, pos.heading);
   }
 
   Widget _buildStageStrip() {
@@ -2658,7 +2920,7 @@ class _TripScreenState extends State<TripScreen>
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _loading ? null : _openNavigation,
+                  onPressed: _loading ? null : () => _focusRouteOnMap(showReadySnack: true),
                   icon: const Icon(Icons.center_focus_strong_rounded, size: 18),
                   label: const Text('View Route'),
                   style: OutlinedButton.styleFrom(
@@ -3239,8 +3501,7 @@ class _TripScreenState extends State<TripScreen>
               _startInAppCall(n);
             }),
           _quickBtn(Icons.chat_rounded, 'Chat', JT.primary, _openTripChat),
-          _quickBtn(Icons.navigation_rounded, 'Navigate', JT.primary,
-              _openNavigation),
+          _quickBtn(Icons.my_location_rounded, 'Re-center', JT.primary, _reCenter),
           if (_status == 'accepted' ||
               _status == 'driver_assigned' ||
               _status == 'arrived')
